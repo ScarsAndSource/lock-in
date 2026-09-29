@@ -10,7 +10,7 @@ anything ORM-shaped. Everything in this file exists to make that possible.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import Enum
 from typing import Literal
 from uuid import UUID
@@ -96,3 +96,63 @@ class DailyCheckin:
     journal_encrypted: bytes | None = None
     defaults_applied: dict = field(default_factory=dict)
     confirmed_at: datetime | None = None
+
+
+class ScreenTimeSource(str, Enum):
+    MANUAL = "manual"
+    EXTENSION = "extension"
+
+
+@dataclass(slots=True)
+class SleepLog:
+    """
+    log_date is the date the sleep period is attributed to -- by
+    convention, the date the user WOKE UP, not the date they went to bed,
+    since that's the day the sleep actually affects. Going to bed at 23:30
+    on the 9th and waking at 07:00 on the 10th logs under the 10th.
+
+    Both time fields are optional and independently nullable -- a partial
+    log (e.g. only self_rated_quality, filled in from memory the next
+    morning) is still a fully valid log, same principle SPEC.md section 8
+    states explicitly for urge quick-capture.
+    """
+    user_id: UUID
+    log_date: date
+    time_to_bed: time | None = None
+    time_woke: time | None = None
+    self_rated_quality: int | None = None  # 1-5
+
+    def __post_init__(self):
+        if self.self_rated_quality is not None and not (1 <= self.self_rated_quality <= 5):
+            raise ValueError("self_rated_quality must be between 1 and 5")
+
+    @property
+    def duration_minutes(self) -> int | None:
+        """
+        None if either boundary is missing. Otherwise assumes a normal
+        night's sleep, where wake time is numerically earlier than bed
+        time on the clock because it crosses midnight -- if wake_minutes
+        <= bed_minutes we add a day. This misfires for a same-day nap
+        logged through these same two fields, but sleep_logs is scoped to
+        nightly sleep per SPEC.md section 6; naps aren't a v1 concept.
+        """
+        if self.time_to_bed is None or self.time_woke is None:
+            return None
+        bed_minutes = self.time_to_bed.hour * 60 + self.time_to_bed.minute
+        wake_minutes = self.time_woke.hour * 60 + self.time_woke.minute
+        if wake_minutes <= bed_minutes:
+            wake_minutes += 24 * 60
+        return wake_minutes - bed_minutes
+
+
+@dataclass(slots=True)
+class ScreenTimeLog:
+    user_id: UUID
+    log_date: date
+    total_minutes: int
+    source: ScreenTimeSource
+    category_breakdown: dict | None = None  # optional, per SPEC.md section 6
+
+    def __post_init__(self):
+        if self.total_minutes < 0:
+            raise ValueError("total_minutes must be >= 0")
