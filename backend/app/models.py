@@ -16,8 +16,12 @@ from __future__ import annotations
 import uuid
 from datetime import date as date_
 from datetime import datetime
+from datetime import time as time_
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, LargeBinary, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary,
+    SmallInteger, Text, Time, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -78,5 +82,40 @@ class DailyCheckinORM(Base):
     journal_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     defaults_applied: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SleepLogORM(Base):
+    __tablename__ = "sleep_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "log_date", name="sleep_logs_user_id_log_date_key"),
+        CheckConstraint("self_rated_quality between 1 and 5", name="sleep_logs_quality_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    log_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    time_to_bed: Mapped[time_ | None] = mapped_column(Time, nullable=True)
+    time_woke: Mapped[time_ | None] = mapped_column(Time, nullable=True)
+    self_rated_quality: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScreenTimeLogORM(Base):
+    __tablename__ = "screen_time_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "log_date", name="screen_time_logs_user_id_log_date_key"),
+        CheckConstraint("source in ('manual', 'extension')", name="screen_time_logs_source_check"),
+        CheckConstraint("total_minutes >= 0", name="screen_time_logs_minutes_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    log_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    total_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    category_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

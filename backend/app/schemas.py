@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.domain import HabitStatus
+from app.domain import HabitStatus, ScreenTimeSource
 
 
 class WeekdaysFrequency(BaseModel):
@@ -95,3 +95,40 @@ class CheckinConfirmOut(BaseModel):
     checkin_date: date
     confirmed_at: datetime
     entries: list[CheckinEntryOut]
+
+
+# ---------------------------------------------------------------------------
+# Sleep
+# ---------------------------------------------------------------------------
+
+class SleepLogRequest(BaseModel):
+    log_date: date
+    time_to_bed: time | None = None
+    time_woke: time | None = None
+    self_rated_quality: Annotated[int | None, Field(ge=1, le=5)] = None
+
+
+class SleepLogOut(BaseModel):
+    log_date: date
+    time_to_bed: time | None
+    time_woke: time | None
+    self_rated_quality: int | None
+    duration_minutes: int | None
+
+
+# ---------------------------------------------------------------------------
+# Screen time
+# ---------------------------------------------------------------------------
+
+class ScreenTimeLogRequest(BaseModel):
+    log_date: date
+    total_minutes: Annotated[int, Field(ge=0)]
+    source: ScreenTimeSource
+    category_breakdown: dict | None = None
+
+
+class ScreenTimeLogOut(BaseModel):
+    log_date: date
+    total_minutes: int
+    source: ScreenTimeSource
+    category_breakdown: dict | None

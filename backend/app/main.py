@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.exceptions import NotFoundError, ValidationError
-from app.routers import checkins, habits
+from app.routers import checkins, habits, screen_time, sleep
 
 settings = get_settings()
 
@@ -38,3 +38,5 @@ async def health() -> dict:
 
 app.include_router(habits.router)
 app.include_router(checkins.router)
+app.include_router(sleep.router)
+app.include_router(screen_time.router)
