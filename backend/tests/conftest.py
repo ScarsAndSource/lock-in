@@ -17,11 +17,18 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.deps import (  # noqa: E402
     get_checkin_repository,
     get_habit_repository,
+    get_screen_time_repository,
+    get_sleep_repository,
 )
 from app.main import app  # noqa: E402
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor  # noqa: E402
 
-from tests.fakes import InMemoryCheckinRepository, InMemoryHabitRepository  # noqa: E402
+from tests.fakes import (  # noqa: E402
+    InMemoryCheckinRepository,
+    InMemoryHabitRepository,
+    InMemoryScreenTimeRepository,
+    InMemorySleepRepository,
+)
 
 
 class ApiWorld:
@@ -36,10 +43,14 @@ class ApiWorld:
     def __init__(self):
         self.habit_repo = InMemoryHabitRepository()
         self.checkin_repo = InMemoryCheckinRepository()
+        self.sleep_repo = InMemorySleepRepository()
+        self.screen_time_repo = InMemoryScreenTimeRepository()
         self.encryptor = FieldEncryptor(os.environ["FIELD_ENCRYPTION_KEY"])
 
         app.dependency_overrides[get_habit_repository] = lambda: self.habit_repo
         app.dependency_overrides[get_checkin_repository] = lambda: self.checkin_repo
+        app.dependency_overrides[get_sleep_repository] = lambda: self.sleep_repo
+        app.dependency_overrides[get_screen_time_repository] = lambda: self.screen_time_repo
         app.dependency_overrides[get_field_encryptor] = lambda: self.encryptor
 
     def client_as(self, user_id) -> TestClient:

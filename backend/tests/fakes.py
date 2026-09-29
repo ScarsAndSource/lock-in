@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from app.domain import DailyCheckin, HabitDefinition, HabitLog, TargetFrequency
+from app.domain import DailyCheckin, HabitDefinition, HabitLog, ScreenTimeLog, ScreenTimeSource, SleepLog, TargetFrequency
 
 
 class InMemoryHabitRepository:
@@ -78,3 +78,43 @@ class InMemoryCheckinRepository:
     async def upsert(self, checkin: DailyCheckin) -> DailyCheckin:
         self._checkins[(checkin.user_id, checkin.checkin_date)] = checkin
         return checkin
+
+
+class InMemorySleepRepository:
+    def __init__(self):
+        self._logs: dict[tuple[UUID, date], SleepLog] = {}
+
+    async def upsert_log(self, log: SleepLog) -> SleepLog:
+        self._logs[(log.user_id, log.log_date)] = log
+        return log
+
+    async def get_log(self, user_id: UUID, log_date: date) -> SleepLog | None:
+        return self._logs.get((user_id, log_date))
+
+    async def list_logs_in_range(
+        self, user_id: UUID, start_date: date, end_date: date
+    ) -> list[SleepLog]:
+        return sorted(
+            [l for (uid, d), l in self._logs.items() if uid == user_id and start_date <= d <= end_date],
+            key=lambda l: l.log_date,
+        )
+
+
+class InMemoryScreenTimeRepository:
+    def __init__(self):
+        self._logs: dict[tuple[UUID, date], ScreenTimeLog] = {}
+
+    async def upsert_log(self, log: ScreenTimeLog) -> ScreenTimeLog:
+        self._logs[(log.user_id, log.log_date)] = log
+        return log
+
+    async def get_log(self, user_id: UUID, log_date: date) -> ScreenTimeLog | None:
+        return self._logs.get((user_id, log_date))
+
+    async def list_logs_in_range(
+        self, user_id: UUID, start_date: date, end_date: date
+    ) -> list[ScreenTimeLog]:
+        return sorted(
+            [l for (uid, d), l in self._logs.items() if uid == user_id and start_date <= d <= end_date],
+            key=lambda l: l.log_date,
+        )
