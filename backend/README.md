@@ -1,18 +1,56 @@
-# Lock'in backend — slice 1 (habit domain + unified daily check-in)
+# Lock'in backend
 
-## What's in this slice
-- Habit domain: create/list habits, log/correct a habit's status for any date.
-- Unified daily check-in: opt-out defaults ("same as usual") computed from
-  same-weekday history, confirm flow that persists real logs, encrypted
-  journal text.
-- RLS on every table, application-layer ownership checks as a second line
-  of defense on top of it, field-level encryption for journal text.
+## Slice status
 
-## What's deliberately NOT in this slice
-Sleep, screen time, study, urge/relapse, implementation intentions, goals,
-pattern insights (Groq), weekly retrospectives — all later slices, per
-SPEC.md section 12's build order. Nothing here is a stub pretending to be
-one of those; they simply don't exist yet.
+| Slice | What | Status |
+|-------|------|--------|
+| 1 | Habit domain, unified daily check-in (defaults engine, encrypted journal) | ✅ Done |
+| 3 | Sleep + screen-time logging, basic stats | ✅ Done |
+| 3b | Missions (goal-scoped sprints) | ✅ Done |
+| 3c | Schedule service, consistency scoring, pattern detection, profile, account export/delete, rate limiting | ✅ Done |
+| 4 | Study sessions | 🔜 Next |
+| 5 | Urge / relapse logging | 🔜 Next |
+| 6 | If-then plans / implementation intentions | 🔜 Next |
+| 7 | Groq insight layer | 🔜 Next |
+
+## Endpoints (current)
+
+```
+POST   /habits/                    create habit
+GET    /habits/                    list habits
+PATCH  /habits/{id}                update habit
+DELETE /habits/{id}                archive habit
+POST   /habits/{id}/log            log habit status for a date
+GET    /habits/{id}/logs           list habit logs
+
+POST   /checkins/v2                upsert daily check-in (bulk form)
+GET    /checkins/v2/{date}         get check-in for a date
+GET    /checkins/v2/defaults       compute opt-out defaults for today
+
+GET    /sleep/                     list sleep logs
+POST   /sleep/                     create/upsert sleep log
+DELETE /sleep/{date}               delete sleep log
+
+GET    /screen-time/               list screen-time logs
+POST   /screen-time/               create/upsert screen-time log
+DELETE /screen-time/{date}         delete screen-time log
+
+GET    /stats/                     overall stats summary
+GET    /stats/habits/{id}          consistency score for one habit
+GET    /stats/habits/{id}/patterns detected patterns for one habit
+
+POST   /missions/                  start a mission
+GET    /missions/                  active mission
+GET    /missions/history           completed / abandoned missions
+POST   /missions/{id}/complete     complete a mission
+POST   /missions/{id}/abandon      abandon a mission
+
+GET    /profile/                   get profile
+PUT    /profile/                   upsert profile
+
+GET    /account/me/export          export all user data as JSON
+DELETE /account/me                 delete account and all data
+```
 
 ## Setup
 
@@ -23,8 +61,10 @@ pip install -r requirements.txt
 cp .env.example .env          # then fill in your actual Supabase values
 ```
 
-Run the migration against your Supabase project's SQL editor (or `psql`):
-`migrations/001_init_habit_and_checkin.sql`.
+Run migrations against your Supabase project's SQL editor (or `psql`) in order:
+- `migrations/001_init_habit_and_checkin.sql`
+- `migrations/002_sleep_and_screen_time.sql`
+- `migrations/003_missions_defaults_grants.sql`
 
 ```bash
 uvicorn app.main:app --reload
@@ -38,34 +78,17 @@ Visit `http://localhost:8000/docs` for interactive API docs.
 python -m pytest -v
 ```
 
-33 tests, all passing as of this slice: the defaults engine's weekday/tie/
-lookback-window logic, the encryption module (round-trip, tampering,
-wrong-key), and the full HTTP flow (auth, cross-user access control,
-encryption-at-rest, correcting a past default) via an in-memory fake
-database.
+Tests use fully in-memory fakes — no database or network required.
 
-## What was NOT verified, and why — read this before deploying
+## What has NOT been verified against a live database
 
-I'm stating this plainly because "no mistakes" has to include not
-overstating what's actually been checked:
-
-- **The SQL migration has not been run against a real Postgres/Supabase
-  instance.** This sandbox has no database to run it against, and I'm not
-  going to ask you for real Supabase credentials to test with. The SQL was
-  written and reviewed carefully (correct RLS policy syntax, correct FK
-  references to `auth.users`, `gen_random_uuid()` requires the `pgcrypto`
-  extension which the migration enables) but "carefully reviewed" is not
-  the same claim as "executed successfully." **Run it in a scratch Supabase
-  project first, not your real one, before trusting it.**
-- **The Supabase JWT verification assumes HS256 shared-secret signing.**
-  Flagged in `.env.example` and `app/config.py` — verify which scheme your
-  project actually uses before relying on auth working at all.
-- **No rate limiting anywhere yet.** Not needed for this slice (no Groq
-  calls, no expensive endpoints), but it's a real gap once the insight
-  feed and chat land in a later slice, per SPEC.md's own requirement.
-- **Load-bearing assumption on the defaults algorithm itself**: "same
-  weekday, last 4 occurrences, majority wins" is a reasonable v1 heuristic,
-  not something SPEC.md pinned down or something user-tested. It's fully
-  unit tested for internal consistency (it does what it's designed to do),
-  not validated against what actually feels right to a real user yet — that
-  can only come from you and your friends actually using it.
+- **SQL migrations** have not been executed against a real Postgres/Supabase instance.
+  The SQL is carefully reviewed (correct RLS syntax, FK references to `auth.users`,
+  `pgcrypto` extension for `gen_random_uuid()`) but **"reviewed" ≠ "executed."**
+  Run against a scratch Supabase project first.
+- **JWT verification**: the HS256 shared-secret path is unit-tested.
+  The JWKS asymmetric path (`AUTH_MODE=jwks`) exercises the cache and decode
+  logic but requires a live JWKS endpoint to validate end-to-end.
+- **Rate limiting** is in-memory and process-local. It resets on every restart
+  and is not coordinated across multiple workers. Acceptable for a single-process
+  deployment; add Redis if you scale out.
