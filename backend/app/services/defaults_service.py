@@ -1,116 +1,142 @@
 """
-Computes "same as usual" defaults for the opt-out daily check-in
-(SPEC.md section 10, item 1).
+"Same as usual" defaults for the opt-out daily check-in.
 
-Design, stated explicitly because SPEC.md does not pin down an exact
-algorithm and this is a genuine engineering decision, not a detail:
+HABITS: same-weekday history, last 4 occurrences, majority wins, tie -> most
+recent; <2 occurrences -> optimistic DONE flagged low-confidence. NEW: rest
+days (see schedule.py) propose nothing.
 
-For a given habit and target date, look at the habit's logged history on
-the SAME weekday (a gym habit skipped every Sunday and done every other
-day has a real weekday pattern; collapsing all days together would wash
-that out). Take up to the last 4 same-weekday occurrences:
+SLEEP / SCREEN TIME: median of the last 7 REAL logs. Auto-filled (is_default)
+rows are excluded from the basis so a guess can never feed on itself and turn
+into fabricated "history". Needs >= 2 real logs, else no proposal.
+Bedtime uses a circular median (23:30 & 00:30 -> 00:00, not 12:00).
 
-  - 2+ prior occurrences on that weekday: default = the majority status
-    among them. A tie goes to the most recent one (recency beats a stale
-    tie). This is treated as a confident default.
-  - 0 or 1 prior occurrences: not enough signal to call this "usual" yet.
-    Default optimistically to DONE (the habit exists because the user
-    declared an intention to do it), but flagged is_low_confidence=True so
-    the UI can visually distinguish a real pattern from a first guess
-    instead of presenting both with equal confidence.
-
-This function is pure: no I/O, no clock access beyond the target_date
-argument, fully deterministic given its inputs. Whether a habit already
-has a real log for target_date, and therefore shouldn't get a default
-proposed at all, is the caller's responsibility (checkins_service) — this
-function always proposes a default for every habit it's given, on the
-assumption that filtering already happened upstream.
+All functions are pure.
 """
 from __future__ import annotations
 
+import statistics
 from collections import Counter
-from datetime import date
+from datetime import date, time
 from uuid import UUID
 
-from app.domain import HabitDefault, HabitDefinition, HabitLog, HabitStatus
+from app.domain import (
+    HabitDefault, HabitDefinition, HabitLog, HabitStatus,
+    ScreenTimeLog, ScreenTimeProposal, SleepLog, SleepProposal,
+)
+from app.services.schedule import check_scheduled
 
 _LOOKBACK_OCCURRENCES = 4
 _MIN_OCCURRENCES_FOR_CONFIDENCE = 2
 
+_PROPOSAL_WINDOW = 7
+_PROPOSAL_MIN_LOGS = 2
+_PROPOSAL_CONFIDENT_LOGS = 4
+_BEDTIME_OFFSET = 18 * 60  # minutes after 18:00 -> midnight is mid-scale, not a cliff
 
+
+# ------------------------------------------------------------------ habits
 def compute_habit_defaults(
     habits: list[HabitDefinition],
     logs_by_habit: dict[UUID, list[HabitLog]],
     target_date: date,
 ) -> dict[UUID, HabitDefault]:
-    """
-    habits: active habit definitions to compute a default for.
-    logs_by_habit: each habit's log history (any order, any date range —
-        this function does the filtering and sorting itself). Habits with
-        no entry in this dict are treated as having no history.
-    target_date: the date the default is being proposed for.
-
-    Returns a dict keyed by habit_id. Every habit passed in gets an entry —
-    there is no silent skipping, since a caller that passed a habit in
-    clearly wants a default for it.
-    """
-    results: dict[UUID, HabitDefault] = {}
-
-    for habit in habits:
-        history = logs_by_habit.get(habit.id, [])
-        results[habit.id] = _compute_single_default(habit, history, target_date)
-
-    return results
+    return {
+        habit.id: _compute_single_default(habit, logs_by_habit.get(habit.id, []), target_date)
+        for habit in habits
+    }
 
 
-def _compute_single_default(
-    habit: HabitDefinition,
-    history: list[HabitLog],
-    target_date: date,
-) -> HabitDefault:
+def _compute_single_default(habit: HabitDefinition, history: list[HabitLog], target_date: date) -> HabitDefault:
+    verdict = check_scheduled(habit.target_frequency, target_date, history)
+    if not verdict.scheduled:
+        return HabitDefault(
+            habit_id=habit.id, status=None, is_low_confidence=False,
+            based_on_count=0, reason=verdict.reason, is_scheduled=False,
+        )
+
     same_weekday_logs = sorted(
-        (log for log in history if log.log_date.weekday() == target_date.weekday()
-         and log.log_date < target_date),
+        (log for log in history if log.log_date.weekday() == target_date.weekday() and log.log_date < target_date),
         key=lambda log: log.log_date,
         reverse=True,
     )[:_LOOKBACK_OCCURRENCES]
-
     occurrence_count = len(same_weekday_logs)
 
     if occurrence_count < _MIN_OCCURRENCES_FOR_CONFIDENCE:
         return HabitDefault(
-            habit_id=habit.id,
-            status=HabitStatus.DONE,
-            is_low_confidence=True,
+            habit_id=habit.id, status=HabitStatus.DONE, is_low_confidence=True,
             based_on_count=occurrence_count,
-            reason=(
-                "Not enough history on this weekday yet — defaulting to "
-                "done since that's the habit's stated goal."
-            ),
+            reason="Not enough history on this weekday yet — defaulting to done since that's the habit's stated goal.",
         )
 
     status_counts = Counter(log.status for log in same_weekday_logs)
     top_count = max(status_counts.values())
-    tied_statuses = [s for s, c in status_counts.items() if c == top_count]
-
-    if len(tied_statuses) == 1:
-        chosen_status = tied_statuses[0]
-    else:
-        # Tie: recency wins. same_weekday_logs is already sorted most
-        # recent first, so the first log whose status is in the tie set
-        # is the tiebreaker.
-        chosen_status = next(
-            log.status for log in same_weekday_logs if log.status in tied_statuses
-        )
+    tied = [s for s, c in status_counts.items() if c == top_count]
+    chosen = tied[0] if len(tied) == 1 else next(log.status for log in same_weekday_logs if log.status in tied)
 
     return HabitDefault(
-        habit_id=habit.id,
-        status=chosen_status,
-        is_low_confidence=False,
-        based_on_count=occurrence_count,
+        habit_id=habit.id, status=chosen, is_low_confidence=False, based_on_count=occurrence_count,
         reason=(
-            f"Usually '{chosen_status.value}' on this day of the week "
-            f"({top_count}/{occurrence_count} of the last {occurrence_count} "
-            f"occurrences)."
+            f"Usually '{chosen.value}' on this day of the week "
+            f"({top_count}/{occurrence_count} of the last {occurrence_count} occurrences)."
         ),
+    )
+
+
+# ------------------------------------------------------------------ sleep / screen
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def _to_time(total_minutes: int) -> time:
+    total_minutes %= 24 * 60
+    return time(total_minutes // 60, total_minutes % 60)
+
+
+def _median_bedtime(bed_minutes: list[int]) -> time:
+    shifted = [(m - _BEDTIME_OFFSET) % (24 * 60) for m in bed_minutes]
+    median = round(statistics.median(shifted))
+    return _to_time(median + _BEDTIME_OFFSET)
+
+
+def _median_clock(minutes: list[int]) -> time:
+    return _to_time(round(statistics.median(minutes)))
+
+
+def _recent_real(history, target_date: date) -> list:
+    real = [log for log in history if not log.is_default and log.log_date < target_date]
+    return sorted(real, key=lambda log: log.log_date, reverse=True)[:_PROPOSAL_WINDOW]
+
+
+def compute_sleep_default(history: list[SleepLog], target_date: date) -> SleepProposal | None:
+    real = _recent_real(history, target_date)
+    if len(real) < _PROPOSAL_MIN_LOGS:
+        return None
+
+    beds = [_minutes(l.time_to_bed) for l in real if l.time_to_bed is not None]
+    wakes = [_minutes(l.time_woke) for l in real if l.time_woke is not None]
+    quals = [l.self_rated_quality for l in real if l.self_rated_quality is not None]
+
+    bed = _median_bedtime(beds) if len(beds) >= 2 else None
+    wake = _median_clock(wakes) if len(wakes) >= 2 else None
+    quality = statistics.median_low(quals) if len(quals) >= 2 else None
+    if bed is None and wake is None and quality is None:
+        return None
+
+    return SleepProposal(
+        time_to_bed=bed, time_woke=wake, self_rated_quality=quality,
+        based_on_count=len(real),
+        is_low_confidence=len(real) < _PROPOSAL_CONFIDENT_LOGS,
+        reason=f"Typical of your last {len(real)} logged nights.",
+    )
+
+
+def compute_screen_time_default(history: list[ScreenTimeLog], target_date: date) -> ScreenTimeProposal | None:
+    real = _recent_real(history, target_date)
+    if len(real) < _PROPOSAL_MIN_LOGS:
+        return None
+    minutes = int(round(statistics.median(l.total_minutes for l in real)))
+    return ScreenTimeProposal(
+        total_minutes=minutes, based_on_count=len(real),
+        is_low_confidence=len(real) < _PROPOSAL_CONFIDENT_LOGS,
+        reason=f"Typical of your last {len(real)} logged days.",
     )
