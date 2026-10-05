@@ -4,11 +4,12 @@ from datetime import date, datetime, time
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.domain import HabitStatus, ScreenTimeSource
+from app.domain import HabitStatus, MissionStatus, ScreenTimeSource
 
 
+# ---------------------------------------------------------------- habits
 class WeekdaysFrequency(BaseModel):
     type: Literal["weekdays"]
     days: Annotated[list[int], Field(min_length=1, max_length=7)]
@@ -26,14 +27,23 @@ class NPerWeekFrequency(BaseModel):
     count: Annotated[int, Field(ge=1, le=7)]
 
 
-TargetFrequencyIn = Annotated[
-    WeekdaysFrequency | NPerWeekFrequency, Field(discriminator="type")
-]
+TargetFrequencyIn = Annotated[WeekdaysFrequency | NPerWeekFrequency, Field(discriminator="type")]
 
 
 class HabitCreateRequest(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=200)]
     target_frequency: TargetFrequencyIn
+
+
+class HabitPatchRequest(BaseModel):
+    name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
+    archived: bool | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "HabitPatchRequest":
+        if self.name is None and self.archived is None:
+            raise ValueError("Provide at least one of: name, archived")
+        return self
 
 
 class HabitOut(BaseModel):
@@ -57,50 +67,7 @@ class HabitLogOut(BaseModel):
     is_default: bool
 
 
-class CheckinEntryOut(BaseModel):
-    habit_id: UUID
-    habit_name: str
-    status: HabitStatus
-    is_default: bool
-    is_low_confidence: bool
-    reason: str
-
-
-class CheckinViewOut(BaseModel):
-    checkin_date: date
-    already_confirmed: bool
-    entries: list[CheckinEntryOut]
-
-
-class CheckinOverrideIn(BaseModel):
-    habit_id: UUID
-    status: HabitStatus
-    note: Annotated[str | None, Field(max_length=2000)] = None
-
-
-class CheckinConfirmRequest(BaseModel):
-    overrides: list[CheckinOverrideIn] = Field(default_factory=list)
-    journal_text: Annotated[str | None, Field(max_length=10_000)] = None
-
-    @field_validator("overrides")
-    @classmethod
-    def _no_duplicate_habit_overrides(cls, v: list[CheckinOverrideIn]) -> list[CheckinOverrideIn]:
-        habit_ids = [o.habit_id for o in v]
-        if len(habit_ids) != len(set(habit_ids)):
-            raise ValueError("overrides must not reference the same habit_id more than once")
-        return v
-
-
-class CheckinConfirmOut(BaseModel):
-    checkin_date: date
-    confirmed_at: datetime
-    entries: list[CheckinEntryOut]
-
-
-# ---------------------------------------------------------------------------
-# Sleep
-# ---------------------------------------------------------------------------
-
+# ---------------------------------------------------------------- sleep
 class SleepLogRequest(BaseModel):
     log_date: date
     time_to_bed: time | None = None
@@ -114,12 +81,10 @@ class SleepLogOut(BaseModel):
     time_woke: time | None
     self_rated_quality: int | None
     duration_minutes: int | None
+    is_default: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Screen time
-# ---------------------------------------------------------------------------
-
+# ---------------------------------------------------------------- screen time
 class ScreenTimeLogRequest(BaseModel):
     log_date: date
     total_minutes: Annotated[int, Field(ge=0)]
@@ -132,3 +97,218 @@ class ScreenTimeLogOut(BaseModel):
     total_minutes: int
     source: ScreenTimeSource
     category_breakdown: dict | None
+    is_default: bool = False
+
+
+# ---------------------------------------------------------------- check-in
+class CheckinEntryOut(BaseModel):
+    habit_id: UUID
+    habit_name: str
+    status: HabitStatus | None  # None on rest days
+    is_default: bool
+    is_low_confidence: bool
+    reason: str
+    is_scheduled: bool = True
+
+
+class SleepProposalOut(BaseModel):
+    time_to_bed: time | None
+    time_woke: time | None
+    self_rated_quality: int | None
+    based_on_count: int
+    is_low_confidence: bool
+    reason: str
+
+
+class ScreenTimeProposalOut(BaseModel):
+    total_minutes: int
+    based_on_count: int
+    is_low_confidence: bool
+    reason: str
+
+
+class SleepSectionOut(BaseModel):
+    logged: SleepLogOut | None
+    proposal: SleepProposalOut | None
+
+
+class ScreenTimeSectionOut(BaseModel):
+    logged: ScreenTimeLogOut | None
+    proposal: ScreenTimeProposalOut | None
+
+
+class CheckinViewOut(BaseModel):
+    checkin_date: date
+    already_confirmed: bool
+    entries: list[CheckinEntryOut]
+    sleep: SleepSectionOut
+    screen_time: ScreenTimeSectionOut
+
+
+class CheckinOverrideIn(BaseModel):
+    habit_id: UUID
+    status: HabitStatus
+    note: Annotated[str | None, Field(max_length=2000)] = None
+
+
+class SleepEntryIn(BaseModel):
+    time_to_bed: time | None = None
+    time_woke: time | None = None
+    self_rated_quality: Annotated[int | None, Field(ge=1, le=5)] = None
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "SleepEntryIn":
+        if self.time_to_bed is None and self.time_woke is None and self.self_rated_quality is None:
+            raise ValueError("A sleep entry needs at least one field")
+        return self
+
+
+class ScreenTimeEntryIn(BaseModel):
+    total_minutes: Annotated[int, Field(ge=0, le=1440)]
+    source: ScreenTimeSource = ScreenTimeSource.MANUAL
+    category_breakdown: dict | None = None
+
+
+class CheckinConfirmRequest(BaseModel):
+    overrides: list[CheckinOverrideIn] = Field(default_factory=list)
+    # None = leave the existing journal untouched. "" = clear it.
+    journal_text: Annotated[str | None, Field(max_length=10_000)] = None
+    sleep: SleepEntryIn | None = None
+    screen_time: ScreenTimeEntryIn | None = None
+    accept_sleep_default: bool = True
+    accept_screen_time_default: bool = True
+
+    @field_validator("overrides")
+    @classmethod
+    def _no_duplicate_habit_overrides(cls, v: list[CheckinOverrideIn]) -> list[CheckinOverrideIn]:
+        ids = [o.habit_id for o in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("overrides must not reference the same habit_id more than once")
+        return v
+
+
+class CheckinConfirmOut(BaseModel):
+    checkin_date: date
+    confirmed_at: datetime
+    entries: list[CheckinEntryOut]
+    sleep: SleepLogOut | None
+    screen_time: ScreenTimeLogOut | None
+
+
+class JournalOut(BaseModel):
+    checkin_date: date
+    journal_text: str | None
+
+
+# ---------------------------------------------------------------- stats
+class HabitConsistencyOut(BaseModel):
+    habit_id: UUID
+    habit_name: str
+    consistency_pct: float | None
+    coverage_pct: float | None
+    longest_run: int
+    current_run: int
+    run_unit: Literal["days", "weeks"]
+    comeback_rate: float | None
+
+
+class ConsistencyOut(BaseModel):
+    end_date: date
+    window_days: int
+    overall_pct: float | None
+    habits: list[HabitConsistencyOut]
+
+
+class ChainDayOut(BaseModel):
+    day: date
+    habits: str
+    sleep: str
+    screen_time: str
+    habit_ratio: float | None
+    sleep_minutes: int | None
+    screen_minutes: int | None
+    sleep_defaulted: bool
+    screen_time_defaulted: bool
+
+
+class ChainOut(BaseModel):
+    end_date: date
+    days: list[ChainDayOut]
+
+
+class PatternOut(BaseModel):
+    key: str
+    trigger: str
+    outcome: str
+    lag_days: int
+    trigger_days: int
+    hits: int
+    rate_after_trigger: float
+    baseline_days: int
+    baseline_rate: float
+    evidence_dates: list[date]
+    statement: str
+
+
+class PatternsOut(BaseModel):
+    end_date: date
+    days: int
+    patterns: list[PatternOut]
+
+
+# ---------------------------------------------------------------- missions
+class MissionCreateRequest(BaseModel):
+    title: Annotated[str, Field(min_length=1, max_length=120)]
+    duration_days: Annotated[int, Field(ge=7, le=365)]
+    start_date: date | None = None
+
+
+class MissionOut(BaseModel):
+    id: UUID
+    title: str
+    start_date: date
+    end_date: date
+    status: MissionStatus
+    ended_at: datetime | None
+
+
+class CheckpointOut(BaseModel):
+    label: str
+    day: int
+    checkpoint_date: date
+
+
+class MissionProgressOut(BaseModel):
+    state: Literal["upcoming", "running", "finished"]
+    day_number: int
+    days_total: int
+    days_left: int
+    elapsed_pct: float
+    phase: str | None
+    next_checkpoint: CheckpointOut | None
+
+
+class MissionDetailOut(BaseModel):
+    mission: MissionOut
+    progress: MissionProgressOut
+    consistency_pct: float | None
+    habits: list[HabitConsistencyOut]
+
+
+class MissionEndRequest(BaseModel):
+    completed: bool
+
+
+# ---------------------------------------------------------------- profile / account
+class ProfileOut(BaseModel):
+    timezone: str
+    tone_preference: str
+    today: date
+
+
+class ProfilePatchRequest(BaseModel):
+    timezone: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm: Literal["DELETE MY DATA"]
