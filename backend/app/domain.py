@@ -1,11 +1,6 @@
 """
-Plain-Python domain entities, deliberately decoupled from SQLAlchemy.
-
-The defaults engine (services/defaults_service.py) is the most important
-piece of logic in this slice — it's the core differentiator from every
-competitor researched in SPEC.md section 3. It needs to be fully unit
-testable without spinning up Postgres, which means it must not import
-anything ORM-shaped. Everything in this file exists to make that possible.
+Plain-Python domain entities, decoupled from SQLAlchemy so the engines
+(defaults, consistency, chain, patterns, missions) are pure and unit-testable.
 """
 from __future__ import annotations
 
@@ -25,18 +20,12 @@ class HabitStatus(str, Enum):
 @dataclass(frozen=True, slots=True)
 class TargetFrequency:
     """
-    Two shapes, matching the check constraint documented in the migration:
-      - weekdays:   specific days of the week (0=Monday .. 6=Sunday)
-      - n_per_week: a count with no fixed days
-
-    n_per_week habits still get a same-weekday default proposed (see
-    defaults_service) — the alternative (no default at all) would defeat
-    the point of the opt-out check-in for exactly the habits where "same
-    as usual" is hardest to intuit.
+      - weekdays:   specific days (0=Monday .. 6=Sunday)
+      - n_per_week: a count with no fixed days (resets every Monday)
     """
     type: Literal["weekdays", "n_per_week"]
-    days: tuple[int, ...] = field(default_factory=tuple)  # used when type == "weekdays"
-    count: int | None = None  # used when type == "n_per_week"
+    days: tuple[int, ...] = field(default_factory=tuple)
+    count: int | None = None
 
     def __post_init__(self):
         if self.type == "weekdays":
@@ -49,6 +38,17 @@ class TargetFrequency:
                 raise ValueError("n_per_week count must be between 1 and 7")
         else:
             raise ValueError(f"unknown target_frequency type: {self.type!r}")
+
+    def to_dict(self) -> dict:
+        if self.type == "weekdays":
+            return {"type": "weekdays", "days": list(self.days)}
+        return {"type": "n_per_week", "count": self.count}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TargetFrequency":
+        if data["type"] == "weekdays":
+            return cls(type="weekdays", days=tuple(data["days"]))
+        return cls(type="n_per_week", count=data["count"])
 
 
 @dataclass(slots=True)
@@ -78,15 +78,17 @@ class HabitLog:
 @dataclass(slots=True)
 class HabitDefault:
     """
-    A *proposed* status for a habit on a date that has no real log yet.
-    Never persisted as-is — either confirmed as-is (becomes a HabitLog with
-    is_default=True) or overridden by the user (becomes is_default=False).
+    A PROPOSED status for a habit on a date with no real log. status is None and
+    is_scheduled False on rest days (weekday habit on an off-day, or an
+    n_per_week habit whose weekly target is already met): nothing is proposed
+    and nothing is written unless the user overrides.
     """
     habit_id: UUID
-    status: HabitStatus
+    status: HabitStatus | None
     is_low_confidence: bool
     based_on_count: int
     reason: str
+    is_scheduled: bool = True
 
 
 @dataclass(slots=True)
@@ -106,21 +108,16 @@ class ScreenTimeSource(str, Enum):
 @dataclass(slots=True)
 class SleepLog:
     """
-    log_date is the date the sleep period is attributed to -- by
-    convention, the date the user WOKE UP, not the date they went to bed,
-    since that's the day the sleep actually affects. Going to bed at 23:30
-    on the 9th and waking at 07:00 on the 10th logs under the 10th.
-
-    Both time fields are optional and independently nullable -- a partial
-    log (e.g. only self_rated_quality, filled in from memory the next
-    morning) is still a fully valid log, same principle SPEC.md section 8
-    states explicitly for urge quick-capture.
+    log_date = the date the user WOKE UP. All fields optional; a partial log is
+    valid. is_default=True marks a log auto-filled from "same as usual" -- the
+    insight/pattern engines ignore those so guesses never become "evidence".
     """
     user_id: UUID
     log_date: date
     time_to_bed: time | None = None
     time_woke: time | None = None
     self_rated_quality: int | None = None  # 1-5
+    is_default: bool = False
 
     def __post_init__(self):
         if self.self_rated_quality is not None and not (1 <= self.self_rated_quality <= 5):
@@ -128,21 +125,13 @@ class SleepLog:
 
     @property
     def duration_minutes(self) -> int | None:
-        """
-        None if either boundary is missing. Otherwise assumes a normal
-        night's sleep, where wake time is numerically earlier than bed
-        time on the clock because it crosses midnight -- if wake_minutes
-        <= bed_minutes we add a day. This misfires for a same-day nap
-        logged through these same two fields, but sleep_logs is scoped to
-        nightly sleep per SPEC.md section 6; naps aren't a v1 concept.
-        """
         if self.time_to_bed is None or self.time_woke is None:
             return None
-        bed_minutes = self.time_to_bed.hour * 60 + self.time_to_bed.minute
-        wake_minutes = self.time_woke.hour * 60 + self.time_woke.minute
-        if wake_minutes <= bed_minutes:
-            wake_minutes += 24 * 60
-        return wake_minutes - bed_minutes
+        bed = self.time_to_bed.hour * 60 + self.time_to_bed.minute
+        wake = self.time_woke.hour * 60 + self.time_woke.minute
+        if wake <= bed:
+            wake += 24 * 60
+        return wake - bed
 
 
 @dataclass(slots=True)
@@ -151,8 +140,52 @@ class ScreenTimeLog:
     log_date: date
     total_minutes: int
     source: ScreenTimeSource
-    category_breakdown: dict | None = None  # optional, per SPEC.md section 6
+    category_breakdown: dict | None = None
+    is_default: bool = False
 
     def __post_init__(self):
         if self.total_minutes < 0:
             raise ValueError("total_minutes must be >= 0")
+
+
+@dataclass(slots=True)
+class SleepProposal:
+    time_to_bed: time | None
+    time_woke: time | None
+    self_rated_quality: int | None
+    based_on_count: int
+    is_low_confidence: bool
+    reason: str
+
+
+@dataclass(slots=True)
+class ScreenTimeProposal:
+    total_minutes: int
+    based_on_count: int
+    is_low_confidence: bool
+    reason: str
+
+
+@dataclass(slots=True)
+class Profile:
+    user_id: UUID
+    timezone: str
+    tone_preference: str
+
+
+class MissionStatus(str, Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ENDED_EARLY = "ended_early"
+
+
+@dataclass(slots=True)
+class Mission:
+    id: UUID
+    user_id: UUID
+    title: str
+    start_date: date
+    end_date: date
+    status: MissionStatus
+    created_at: datetime
+    ended_at: datetime | None = None
