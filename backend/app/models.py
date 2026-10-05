@@ -1,15 +1,6 @@
 """
-SQLAlchemy ORM models. These exist purely for persistence — application
-logic operates on app.domain dataclasses, and repositories translate
-between the two. Keeping this boundary means the ORM never leaks into
-services, routers, or tests that don't need a real database.
-
-Column definitions must stay in lockstep with
-migrations/001_init_habit_and_checkin.sql. There is no migration-generation
-tool wired up in this slice (e.g. Alembic) — flagging that as a deliberate
-gap, not an oversight: for a two-migration-file project it would be
-premature machinery, but it should be added before this schema grows much
-further, or the SQL and the ORM will drift silently.
+SQLAlchemy ORM models (persistence only). Column definitions must stay in
+lockstep with migrations/*.sql -- app/schema_check.py verifies that at startup.
 """
 from __future__ import annotations
 
@@ -28,6 +19,18 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 class Base(DeclarativeBase):
     pass
+
+
+class AuthUserORM(Base):
+    """
+    Stub of Supabase's auth.users. It exists ONLY so ForeignKey("auth.users.id")
+    resolves in SQLAlchemy's metadata (otherwise flushes can raise
+    NoReferencedTableError). This app never creates, reads, or writes it.
+    """
+    __tablename__ = "users"
+    __table_args__ = {"schema": "auth"}
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
 
 
 class ProfileORM(Base):
@@ -99,6 +102,7 @@ class SleepLogORM(Base):
     time_to_bed: Mapped[time_ | None] = mapped_column(Time, nullable=True)
     time_woke: Mapped[time_ | None] = mapped_column(Time, nullable=True)
     self_rated_quality: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    is_default: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -117,5 +121,23 @@ class ScreenTimeLogORM(Base):
     total_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     category_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_default: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MissionORM(Base):
+    __tablename__ = "missions"
+    __table_args__ = (
+        CheckConstraint("status in ('active', 'completed', 'ended_early')", name="missions_status_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
