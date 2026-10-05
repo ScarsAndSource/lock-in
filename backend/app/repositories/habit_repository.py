@@ -11,10 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain import HabitDefinition, HabitLog, HabitStatus, TargetFrequency
 from app.models import HabitDefinitionORM, HabitLogORM
 
-# How far back to pull history when computing "same weekday" defaults.
-# 4 occurrences of a given weekday need at most 4*7 = 28 days if every
-# single one is logged; doubling that comfortably absorbs gaps (sick days,
-# habit paused, etc.) without an unbounded query.
 DEFAULT_HISTORY_LOOKBACK_DAYS = 60
 
 
@@ -25,12 +21,22 @@ class HabitRepository(Protocol):
 
     async def list_active_habits(self, user_id: UUID) -> list[HabitDefinition]: ...
 
+    async def list_habits(self, user_id: UUID, include_archived: bool = False) -> list[HabitDefinition]: ...
+
     async def get_habit(self, user_id: UUID, habit_id: UUID) -> HabitDefinition | None: ...
+
+    async def update_habit(
+        self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
+    ) -> HabitDefinition | None: ...
 
     async def get_recent_logs_by_habit(
         self, user_id: UUID, habit_ids: list[UUID], before_date: date,
         lookback_days: int = DEFAULT_HISTORY_LOOKBACK_DAYS,
     ) -> dict[UUID, list[HabitLog]]: ...
+
+    async def get_logs_in_range(
+        self, user_id: UUID, habit_ids: list[UUID], start_date: date, end_date: date,
+    ) -> list[HabitLog]: ...
 
     async def get_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> HabitLog | None: ...
 
@@ -72,15 +78,6 @@ def _log_from_orm(row: HabitLogORM) -> HabitLog:
 
 
 class SqlAlchemyHabitRepository:
-    """
-    Every method here filters by user_id explicitly, in addition to Postgres
-    RLS enforcing the same boundary at the database layer. This is
-    deliberate defense-in-depth per SPEC.md's stance that the friend-group
-    v1 and a public launch run the exact same code path — a single point of
-    failure in access control (relying on RLS alone, or on the app layer
-    alone) is not acceptable for tables holding this kind of personal data.
-    """
-
     def __init__(self, session: AsyncSession):
         self._session = session
 
@@ -108,6 +105,13 @@ class SqlAlchemyHabitRepository:
         result = await self._session.execute(stmt)
         return [_habit_from_orm(row) for row in result.scalars().all()]
 
+    async def list_habits(self, user_id: UUID, include_archived: bool = False) -> list[HabitDefinition]:
+        stmt = select(HabitDefinitionORM).where(HabitDefinitionORM.user_id == user_id)
+        if not include_archived:
+            stmt = stmt.where(HabitDefinitionORM.archived_at.is_(None))
+        result = await self._session.execute(stmt.order_by(HabitDefinitionORM.created_at))
+        return [_habit_from_orm(row) for row in result.scalars().all()]
+
     async def get_habit(self, user_id: UUID, habit_id: UUID) -> HabitDefinition | None:
         stmt = select(HabitDefinitionORM).where(
             HabitDefinitionORM.id == habit_id,
@@ -116,6 +120,25 @@ class SqlAlchemyHabitRepository:
         result = await self._session.execute(stmt)
         row = result.scalar_one_or_none()
         return _habit_from_orm(row) if row else None
+
+    async def update_habit(
+        self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
+    ) -> HabitDefinition | None:
+        stmt = select(HabitDefinitionORM).where(
+            HabitDefinitionORM.id == habit_id, HabitDefinitionORM.user_id == user_id
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        if name is not None:
+            row.name = name
+        if archived is True:
+            row.archived_at = now
+        elif archived is False:
+            row.archived_at = None
+        row.updated_at = now
+        await self._session.flush()
+        return _habit_from_orm(row)
 
     async def get_recent_logs_by_habit(
         self, user_id: UUID, habit_ids: list[UUID], before_date: date,
@@ -137,6 +160,20 @@ class SqlAlchemyHabitRepository:
         for row in result.scalars().all():
             grouped[row.habit_id].append(_log_from_orm(row))
         return grouped
+
+    async def get_logs_in_range(
+        self, user_id: UUID, habit_ids: list[UUID], start_date: date, end_date: date,
+    ) -> list[HabitLog]:
+        if not habit_ids:
+            return []
+        stmt = select(HabitLogORM).where(
+            HabitLogORM.user_id == user_id,
+            HabitLogORM.habit_id.in_(habit_ids),
+            HabitLogORM.log_date >= start_date,
+            HabitLogORM.log_date <= end_date,
+        )
+        result = await self._session.execute(stmt)
+        return [_log_from_orm(row) for row in result.scalars().all()]
 
     async def get_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> HabitLog | None:
         stmt = select(HabitLogORM).where(

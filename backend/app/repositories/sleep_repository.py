@@ -29,15 +29,11 @@ def _log_from_orm(row: SleepLogORM) -> SleepLog:
         time_to_bed=row.time_to_bed,
         time_woke=row.time_woke,
         self_rated_quality=row.self_rated_quality,
+        is_default=row.is_default,
     )
 
 
 class SqlAlchemySleepRepository:
-    """
-    Same defense-in-depth stance as SqlAlchemyHabitRepository: every query
-    filters by user_id explicitly, on top of (not instead of) Postgres RLS.
-    """
-
     def __init__(self, session: AsyncSession):
         self._session = session
 
@@ -51,6 +47,7 @@ class SqlAlchemySleepRepository:
                 time_to_bed=log.time_to_bed,
                 time_woke=log.time_woke,
                 self_rated_quality=log.self_rated_quality,
+                is_default=log.is_default,
                 created_at=now,
                 updated_at=now,
             )
@@ -60,6 +57,7 @@ class SqlAlchemySleepRepository:
                     "time_to_bed": log.time_to_bed,
                     "time_woke": log.time_woke,
                     "self_rated_quality": log.self_rated_quality,
+                    "is_default": log.is_default,
                     "updated_at": now,
                 },
             )

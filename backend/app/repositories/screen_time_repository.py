@@ -29,6 +29,7 @@ def _log_from_orm(row: ScreenTimeLogORM) -> ScreenTimeLog:
         total_minutes=row.total_minutes,
         source=ScreenTimeSource(row.source),
         category_breakdown=row.category_breakdown,
+        is_default=row.is_default,
     )
 
 
@@ -46,6 +47,7 @@ class SqlAlchemyScreenTimeRepository:
                 total_minutes=log.total_minutes,
                 source=log.source.value,
                 category_breakdown=log.category_breakdown,
+                is_default=log.is_default,
                 created_at=now,
                 updated_at=now,
             )
@@ -55,6 +57,7 @@ class SqlAlchemyScreenTimeRepository:
                     "total_minutes": log.total_minutes,
                     "source": log.source.value,
                     "category_breakdown": log.category_breakdown,
+                    "is_default": log.is_default,
                     "updated_at": now,
                 },
             )
