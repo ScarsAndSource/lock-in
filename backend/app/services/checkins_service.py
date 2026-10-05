@@ -1,171 +1,263 @@
+"""
+The unified daily check-in: habits + sleep + screen time in one confirm.
+
+  - Rest days (not scheduled) propose nothing and write nothing.
+  - Sleep/screen proposals are persisted only if accepted (default: accepted),
+    flagged is_default=True, and never used as the basis for future proposals.
+  - journal_text: None keeps the existing journal, "" clears it, text replaces it.
+  - Everything runs in the request's single DB transaction (see db.py).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
-from app.domain import DailyCheckin, HabitLog, HabitStatus
-from app.exceptions import NotFoundError
+from app.dates import Clock, assert_loggable_date, utc_now
+from app.domain import (
+    DailyCheckin, HabitLog, HabitStatus, ScreenTimeLog, ScreenTimeProposal,
+    ScreenTimeSource, SleepLog, SleepProposal,
+)
+from app.exceptions import DataIntegrityError, NotFoundError
 from app.repositories.checkin_repository import CheckinRepository
 from app.repositories.habit_repository import HabitRepository
+from app.repositories.screen_time_repository import ScreenTimeRepository
+from app.repositories.sleep_repository import SleepRepository
 from app.security import FieldEncryptor
-from app.services.defaults_service import compute_habit_defaults
+from app.services.defaults_service import compute_habit_defaults, compute_screen_time_default, compute_sleep_default
+
+_PROPOSAL_LOOKBACK_DAYS = 30
 
 
 @dataclass(slots=True)
 class CheckinEntry:
     habit_id: UUID
     habit_name: str
-    status: HabitStatus
+    status: HabitStatus | None
     is_default: bool
     is_low_confidence: bool
     reason: str
+    is_scheduled: bool = True
+
+
+@dataclass(slots=True)
+class SleepInput:
+    time_to_bed: time | None
+    time_woke: time | None
+    self_rated_quality: int | None
+
+
+@dataclass(slots=True)
+class ScreenTimeInput:
+    total_minutes: int
+    source: ScreenTimeSource
+    category_breakdown: dict | None
+
+
+@dataclass(slots=True)
+class CheckinView:
+    entries: list[CheckinEntry]
+    already_confirmed: bool
+    sleep_log: SleepLog | None
+    sleep_proposal: SleepProposal | None
+    screen_log: ScreenTimeLog | None
+    screen_proposal: ScreenTimeProposal | None
+
+
+@dataclass(slots=True)
+class ConfirmResult:
+    entries: list[CheckinEntry]
+    confirmed_at: datetime
+    sleep_log: SleepLog | None
+    screen_log: ScreenTimeLog | None
 
 
 class CheckinsService:
     def __init__(
-        self,
-        habit_repo: HabitRepository,
-        checkin_repo: CheckinRepository,
-        encryptor: FieldEncryptor,
+        self, habit_repo: HabitRepository, checkin_repo: CheckinRepository, encryptor: FieldEncryptor,
+        sleep_repo: SleepRepository, screen_repo: ScreenTimeRepository, clock: Clock = utc_now,
     ):
         self._habits = habit_repo
         self._checkins = checkin_repo
         self._encryptor = encryptor
+        self._sleep = sleep_repo
+        self._screen = screen_repo
+        self._clock = clock
 
-    async def get_view(
-        self, user_id: UUID, target_date: date
-    ) -> tuple[list[CheckinEntry], bool]:
-        """
-        Returns the proposed check-in view for target_date: every active
-        habit, either showing its real logged status (already recorded) or
-        a computed default (not yet recorded). Never mutates anything —
-        safe to call repeatedly, e.g. every time the check-in screen loads.
-        """
+    # ------------------------------------------------------------ read
+    async def get_view(self, user_id: UUID, target_date: date) -> CheckinView:
         habits = await self._habits.list_active_habits(user_id)
-        existing_checkin = await self._checkins.get(user_id, target_date)
-        entries = await self._build_entries(user_id, habits, target_date)
-        return entries, existing_checkin is not None and existing_checkin.confirmed_at is not None
-
-    async def confirm(
-        self,
-        user_id: UUID,
-        target_date: date,
-        overrides: dict[UUID, tuple[HabitStatus, str | None]],
-        journal_text: str | None,
-    ) -> list[CheckinEntry]:
-        habits = await self._habits.list_active_habits(user_id)
-        active_habit_ids = {h.id for h in habits}
-
-        unknown_override_ids = set(overrides) - active_habit_ids
-        if unknown_override_ids:
-            raise NotFoundError(
-                f"Override(s) reference habit(s) not found for this user: "
-                f"{unknown_override_ids}"
-            )
-
-        proposed_entries = await self._build_entries(user_id, habits, target_date)
-        defaults_applied_audit: dict[str, dict] = {}
-        final_entries: list[CheckinEntry] = []
-
-        for entry in proposed_entries:
-            if entry.habit_id in overrides:
-                status, note = overrides[entry.habit_id]
-                await self._habits.upsert_log(
-                    HabitLog(
-                        habit_id=entry.habit_id,
-                        user_id=user_id,
-                        log_date=target_date,
-                        status=status,
-                        note=note,
-                        is_default=False,
-                    )
-                )
-                final_status, is_default = status, False
-            elif entry.is_default:
-                # No override given -- the proposed default is accepted as-is.
-                await self._habits.upsert_log(
-                    HabitLog(
-                        habit_id=entry.habit_id,
-                        user_id=user_id,
-                        log_date=target_date,
-                        status=entry.status,
-                        note=None,
-                        is_default=True,
-                    )
-                )
-                final_status, is_default = entry.status, True
-            else:
-                # Already had a real log before this confirm call -- leave
-                # it untouched, don't overwrite a real entry with itself
-                # under a new timestamp for no reason.
-                final_status, is_default = entry.status, False
-
-            defaults_applied_audit[str(entry.habit_id)] = {
-                "was_default_proposed": entry.is_default,
-                "proposed_status": entry.status.value,
-                "final_status": final_status.value,
-                "was_overridden": entry.habit_id in overrides,
-            }
-            final_entries.append(
-                CheckinEntry(
-                    habit_id=entry.habit_id,
-                    habit_name=entry.habit_name,
-                    status=final_status,
-                    is_default=is_default,
-                    is_low_confidence=entry.is_low_confidence,
-                    reason=entry.reason,
-                )
-            )
-
-        await self._checkins.upsert(
-            DailyCheckin(
-                user_id=user_id,
-                checkin_date=target_date,
-                journal_encrypted=self._encryptor.encrypt(journal_text),
-                defaults_applied=defaults_applied_audit,
-                confirmed_at=datetime.now(timezone.utc),
-            )
+        existing = await self._checkins.get(user_id, target_date)
+        sleep_log = await self._sleep.get_log(user_id, target_date)
+        screen_log = await self._screen.get_log(user_id, target_date)
+        return CheckinView(
+            entries=await self._build_entries(user_id, habits, target_date),
+            already_confirmed=existing is not None and existing.confirmed_at is not None,
+            sleep_log=sleep_log,
+            sleep_proposal=None if sleep_log else await self._sleep_proposal(user_id, target_date),
+            screen_log=screen_log,
+            screen_proposal=None if screen_log else await self._screen_proposal(user_id, target_date),
         )
 
-        return final_entries
+    async def get_journal(self, user_id: UUID, target_date: date) -> str | None:
+        checkin = await self._checkins.get(user_id, target_date)
+        if checkin is None:
+            raise NotFoundError("No check-in for this date.")
+        try:
+            return self._encryptor.decrypt(checkin.journal_encrypted)
+        except ValueError as exc:
+            raise DataIntegrityError(str(exc)) from exc
 
-    async def _build_entries(self, user_id, habits, target_date) -> list[CheckinEntry]:
-        habits_needing_defaults = []
-        entries: list[CheckinEntry] = []
+    # ------------------------------------------------------------ write
+    async def confirm(
+        self, user_id: UUID, target_date: date,
+        overrides: dict[UUID, tuple[HabitStatus, str | None]],
+        journal_text: str | None,
+        sleep: SleepInput | None = None,
+        screen_time: ScreenTimeInput | None = None,
+        accept_sleep_default: bool = True,
+        accept_screen_time_default: bool = True,
+    ) -> ConfirmResult:
+        assert_loggable_date(target_date, self._clock().date())
 
-        for habit in habits:
-            existing_log = await self._habits.get_log(user_id, habit.id, target_date)
-            if existing_log is not None:
-                entries.append(
-                    CheckinEntry(
-                        habit_id=habit.id,
-                        habit_name=habit.name,
-                        status=existing_log.status,
-                        is_default=existing_log.is_default,
-                        is_low_confidence=False,
-                        reason="Already logged for this date.",
-                    )
-                )
+        habits = await self._habits.list_active_habits(user_id)
+        unknown = set(overrides) - {h.id for h in habits}
+        if unknown:
+            raise NotFoundError(f"Override(s) reference habit(s) not found for this user: {unknown}")
+
+        proposed = await self._build_entries(user_id, habits, target_date)
+        audit: dict[str, dict] = {}
+        final_entries: list[CheckinEntry] = []
+
+        for entry in proposed:
+            if entry.habit_id in overrides:
+                status, note = overrides[entry.habit_id]
+                await self._habits.upsert_log(HabitLog(
+                    habit_id=entry.habit_id, user_id=user_id, log_date=target_date,
+                    status=status, note=note, is_default=False,
+                ))
+                final_status, is_default = status, False
+            elif not entry.is_scheduled:
+                final_status, is_default = None, False  # rest day: nothing written
+            elif entry.is_default:
+                await self._habits.upsert_log(HabitLog(
+                    habit_id=entry.habit_id, user_id=user_id, log_date=target_date,
+                    status=entry.status, note=None, is_default=True,
+                ))
+                final_status, is_default = entry.status, True
             else:
-                habits_needing_defaults.append(habit)
+                final_status, is_default = entry.status, False  # already a real log; leave it
 
-        if habits_needing_defaults:
+            audit[str(entry.habit_id)] = {
+                "was_default_proposed": entry.is_default,
+                "proposed_status": entry.status.value if entry.status else None,
+                "final_status": final_status.value if final_status else None,
+                "was_overridden": entry.habit_id in overrides,
+                "was_scheduled": entry.is_scheduled,
+            }
+            final_entries.append(CheckinEntry(
+                habit_id=entry.habit_id, habit_name=entry.habit_name, status=final_status,
+                is_default=is_default, is_low_confidence=entry.is_low_confidence,
+                reason=entry.reason, is_scheduled=entry.is_scheduled,
+            ))
+
+        sleep_log, audit["_sleep"] = await self._resolve_sleep(user_id, target_date, sleep, accept_sleep_default)
+        screen_log, audit["_screen_time"] = await self._resolve_screen(
+            user_id, target_date, screen_time, accept_screen_time_default
+        )
+
+        existing = await self._checkins.get(user_id, target_date)
+        if journal_text is None:
+            journal_bytes = existing.journal_encrypted if existing else None
+        else:
+            journal_bytes = self._encryptor.encrypt(journal_text)
+
+        saved = await self._checkins.upsert(DailyCheckin(
+            user_id=user_id, checkin_date=target_date, journal_encrypted=journal_bytes,
+            defaults_applied=audit, confirmed_at=self._clock(),
+        ))
+        return ConfirmResult(final_entries, saved.confirmed_at or self._clock(), sleep_log, screen_log)
+
+    # ------------------------------------------------------------ helpers
+    async def _resolve_sleep(self, user_id, target_date, given: SleepInput | None, accept_default: bool):
+        existing = await self._sleep.get_log(user_id, target_date)
+        if given is not None:
+            log = await self._sleep.upsert_log(SleepLog(
+                user_id=user_id, log_date=target_date, time_to_bed=given.time_to_bed,
+                time_woke=given.time_woke, self_rated_quality=given.self_rated_quality, is_default=False,
+            ))
+            return log, {"source": "override"}
+        if existing is not None:
+            return existing, {"source": "existing"}
+        proposal = await self._sleep_proposal(user_id, target_date) if accept_default else None
+        if proposal is None:
+            return None, {"source": "none"}
+        log = await self._sleep.upsert_log(SleepLog(
+            user_id=user_id, log_date=target_date, time_to_bed=proposal.time_to_bed,
+            time_woke=proposal.time_woke, self_rated_quality=proposal.self_rated_quality, is_default=True,
+        ))
+        return log, {"source": "default"}
+
+    async def _resolve_screen(self, user_id, target_date, given: ScreenTimeInput | None, accept_default: bool):
+        existing = await self._screen.get_log(user_id, target_date)
+        if given is not None:
+            log = await self._screen.upsert_log(ScreenTimeLog(
+                user_id=user_id, log_date=target_date, total_minutes=given.total_minutes,
+                source=given.source, category_breakdown=given.category_breakdown, is_default=False,
+            ))
+            return log, {"source": "override"}
+        if existing is not None:
+            return existing, {"source": "existing"}
+        proposal = await self._screen_proposal(user_id, target_date) if accept_default else None
+        if proposal is None:
+            return None, {"source": "none"}
+        log = await self._screen.upsert_log(ScreenTimeLog(
+            user_id=user_id, log_date=target_date, total_minutes=proposal.total_minutes,
+            source=ScreenTimeSource.MANUAL, category_breakdown=None, is_default=True,
+        ))
+        return log, {"source": "default"}
+
+    async def _sleep_proposal(self, user_id: UUID, target_date: date) -> SleepProposal | None:
+        history = await self._sleep.list_logs_in_range(
+            user_id, target_date - timedelta(days=_PROPOSAL_LOOKBACK_DAYS), target_date - timedelta(days=1)
+        )
+        return compute_sleep_default(history, target_date)
+
+    async def _screen_proposal(self, user_id: UUID, target_date: date) -> ScreenTimeProposal | None:
+        history = await self._screen.list_logs_in_range(
+            user_id, target_date - timedelta(days=_PROPOSAL_LOOKBACK_DAYS), target_date - timedelta(days=1)
+        )
+        return compute_screen_time_default(history, target_date)
+
+    async def _build_entries(self, user_id: UUID, habits, target_date: date) -> list[CheckinEntry]:
+        if not habits:
+            return []
+        # One query for the day's existing logs (was one query per habit).
+        existing_logs = {
+            log.habit_id: log
+            for log in await self._habits.get_logs_in_range(user_id, [h.id for h in habits], target_date, target_date)
+        }
+        needing_defaults = [h for h in habits if h.id not in existing_logs]
+        defaults = {}
+        if needing_defaults:
             logs_by_habit = await self._habits.get_recent_logs_by_habit(
-                user_id, [h.id for h in habits_needing_defaults], target_date
+                user_id, [h.id for h in needing_defaults], target_date
             )
-            defaults = compute_habit_defaults(habits_needing_defaults, logs_by_habit, target_date)
-            for habit in habits_needing_defaults:
-                d = defaults[habit.id]
-                entries.append(
-                    CheckinEntry(
-                        habit_id=habit.id,
-                        habit_name=habit.name,
-                        status=d.status,
-                        is_default=True,
-                        is_low_confidence=d.is_low_confidence,
-                        reason=d.reason,
-                    )
-                )
+            defaults = compute_habit_defaults(needing_defaults, logs_by_habit, target_date)
 
+        entries: list[CheckinEntry] = []
+        for habit in habits:
+            log = existing_logs.get(habit.id)
+            if log is not None:
+                entries.append(CheckinEntry(
+                    habit_id=habit.id, habit_name=habit.name, status=log.status,
+                    is_default=log.is_default, is_low_confidence=False, reason="Already logged for this date.",
+                ))
+                continue
+            d = defaults[habit.id]
+            entries.append(CheckinEntry(
+                habit_id=habit.id, habit_name=habit.name, status=d.status,
+                is_default=d.is_scheduled,  # rest days are not "defaults to persist"
+                is_low_confidence=d.is_low_confidence, reason=d.reason, is_scheduled=d.is_scheduled,
+            ))
         return entries
