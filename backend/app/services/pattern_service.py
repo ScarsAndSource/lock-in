@@ -83,3 +83,7 @@ def find_patterns(
 
     found.sort(key=lambda p: p.rate_after_trigger - p.baseline_rate, reverse=True)
     return found
+
+
+PAIRS = _PAIRS  # public alias: the retro engine replays proven patterns against a single week
+

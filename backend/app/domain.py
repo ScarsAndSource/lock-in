@@ -207,3 +207,22 @@ class WeeklyRetro:
     voice_version: str
     model: str | None
     completed_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class PatternInsight:
+    """Stub for slice 8: full insights slice is later."""
+    id: UUID
+    user_id: UUID
+    generated_at: datetime
+    generated_on: date
+    pattern_key: str
+    insight_text: str
+    next_step: str
+    source_domains: list[str]
+    evidence_refs: dict
+    narrated: bool
+    voice_version: str
+    model: str | None
+    user_feedback: str | None = None
+
