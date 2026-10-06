@@ -189,3 +189,21 @@ class Mission:
     status: MissionStatus
     created_at: datetime
     ended_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class WeeklyRetro:
+    """summary = exactly the facts the narration was built from (deterministic, JSON-safe)."""
+    id: UUID
+    user_id: UUID
+    week_start: date
+    week_end: date
+    generated_at: datetime
+    narrative: str
+    next_step: str
+    summary: dict
+    evidence_refs: dict
+    narrated: bool
+    voice_version: str
+    model: str | None
+    completed_at: datetime | None = None
