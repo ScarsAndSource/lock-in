@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 from app.domain import (
     DailyCheckin, HabitDefinition, HabitLog, Mission, MissionStatus, Profile,
-    ScreenTimeLog, SleepLog, TargetFrequency,
+    ScreenTimeLog, SleepLog, TargetFrequency, WeeklyRetro,
 )
 from app.repositories.account_repository import json_safe
 
@@ -152,11 +152,43 @@ class InMemoryMissionRepository:
         return m
 
 
+class InMemoryRetroRepository:
+    def __init__(self):
+        self._retros: dict[UUID, WeeklyRetro] = {}
+
+    async def create(self, retro: WeeklyRetro) -> WeeklyRetro | None:
+        if await self.get_by_week(retro.user_id, retro.week_start) is not None:
+            return None
+        self._retros[retro.id] = retro
+        return retro
+
+    async def get_by_week(self, user_id: UUID, week_start: date) -> WeeklyRetro | None:
+        return next(
+            (r for r in self._retros.values() if r.user_id == user_id and r.week_start == week_start), None
+        )
+
+    async def list(self, user_id: UUID, limit: int) -> list[WeeklyRetro]:
+        rows = [r for r in self._retros.values() if r.user_id == user_id]
+        return sorted(rows, key=lambda r: r.week_start, reverse=True)[:limit]
+
+    async def latest(self, user_id: UUID) -> WeeklyRetro | None:
+        rows = await self.list(user_id, 1)
+        return rows[0] if rows else None
+
+    async def mark_completed(self, user_id: UUID, retro_id: UUID, now: datetime) -> WeeklyRetro | None:
+        r = self._retros.get(retro_id)
+        if r is None or r.user_id != user_id:
+            return None
+        r.completed_at = now
+        return r
+
+
 class InMemoryAccountRepository:
     """Reads/deletes straight out of the other fakes' private stores (test-only)."""
 
-    def __init__(self, habits, checkins, sleep, screen, missions, profiles):
-        self._h, self._c, self._s, self._sc, self._m, self._p = habits, checkins, sleep, screen, missions, profiles
+    def __init__(self, habits, checkins, sleep, screen, missions, profiles, retros):
+        self._h, self._c, self._s, self._sc = habits, checkins, sleep, screen
+        self._m, self._p, self._ret = missions, profiles, retros
 
     @staticmethod
     def _row(obj) -> dict:
@@ -171,6 +203,7 @@ class InMemoryAccountRepository:
             "sleep_logs": [self._row(l) for (uid, _), l in self._s._logs.items() if uid == user_id],
             "screen_time_logs": [self._row(l) for (uid, _), l in self._sc._logs.items() if uid == user_id],
             "missions": [self._row(m) for m in self._m._missions.values() if m.user_id == user_id],
+            "weekly_retros": [self._row(r) for r in self._ret._retros.values() if r.user_id == user_id],
         }
 
     async def delete_everything(self, user_id: UUID) -> dict[str, int]:
@@ -186,6 +219,8 @@ class InMemoryAccountRepository:
             "sleep_logs": purge(self._s._logs, lambda k, v: v.user_id),
             "screen_time_logs": purge(self._sc._logs, lambda k, v: v.user_id),
             "missions": purge(self._m._missions, lambda k, v: v.user_id),
+            "weekly_retros": purge(self._ret._retros, lambda k, v: v.user_id),
             "habit_definitions": purge(self._h._habits, lambda k, v: v.user_id),
             "profiles": purge(self._p._profiles, lambda k, v: v.user_id),
         }
+
