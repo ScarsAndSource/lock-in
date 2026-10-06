@@ -12,15 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     DailyCheckinORM, HabitDefinitionORM, HabitLogORM, MissionORM,
-    ProfileORM, ScreenTimeLogORM, SleepLogORM,
+    ProfileORM, ScreenTimeLogORM, SleepLogORM, WeeklyRetroORM,
 )
 
 # (model, owner column). Delete order: children before parents.
 _TABLES = [
     (HabitLogORM, "user_id"), (DailyCheckinORM, "user_id"), (SleepLogORM, "user_id"),
-    (ScreenTimeLogORM, "user_id"), (MissionORM, "user_id"),
+    (ScreenTimeLogORM, "user_id"), (MissionORM, "user_id"), (WeeklyRetroORM, "user_id"),
     (HabitDefinitionORM, "user_id"), (ProfileORM, "id"),
 ]
+
 
 
 def json_safe(value: Any) -> Any:
