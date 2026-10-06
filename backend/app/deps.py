@@ -16,11 +16,18 @@ from app.security import FieldEncryptor, get_field_encryptor
 from app.services.account_service import AccountService
 from app.services.checkins_service import CheckinsService
 from app.services.habits_service import HabitsService
+from app.services.insights_service import InsightsService
+from app.services.llm import GroqClient, LLMClient
 from app.services.missions_service import MissionsService
 from app.services.profile_service import ProfileService
+from app.services.retro_service import RetroService
 from app.services.screen_time_service import ScreenTimeService
 from app.services.sleep_service import SleepService
 from app.services.stats_service import StatsService
+from app.services.study_service import StudyService
+from app.services.urges_service import UrgesService
+from app.repositories.retro_repository import SqlAlchemyRetroRepository
+
 
 
 def get_clock() -> Clock:
@@ -120,3 +127,39 @@ def get_account_service(
     clock: Clock = Depends(get_clock),
 ) -> AccountService:
     return AccountService(repo, encryptor, clock)
+
+
+def get_llm_client() -> LLMClient:
+    """Returns a GroqClient instance. Raises LLMUnavailableError at call time (stub until Groq slice)."""
+    return GroqClient()
+
+
+def get_study_service() -> StudyService:
+    return StudyService()
+
+
+def get_urges_service() -> UrgesService:
+    return UrgesService()
+
+
+def get_insights_service() -> InsightsService:
+    return InsightsService()
+
+
+def get_retro_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyRetroRepository:
+    return SqlAlchemyRetroRepository(session)
+
+
+def get_retro_service(
+    repo: SqlAlchemyRetroRepository = Depends(get_retro_repository),
+    stats: StatsService = Depends(get_stats_service),
+    study: StudyService = Depends(get_study_service),
+    urges: UrgesService = Depends(get_urges_service),
+    missions: MissionsService = Depends(get_missions_service),
+    insights: InsightsService = Depends(get_insights_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    llm: LLMClient = Depends(get_llm_client),
+    clock: Clock = Depends(get_clock),
+) -> RetroService:
+    return RetroService(repo, stats, study, urges, missions, insights, profiles, llm, clock)
+
