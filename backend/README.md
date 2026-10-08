@@ -59,6 +59,67 @@ GET    /account/me/export            export all user data as JSON
 DELETE /account/me                   delete account and all data
 ```
 
+## Slice 8 — weekly retro architecture
+
+### The chain tracer
+
+Every retro starts with pure Python, not the model. `retro_engine.py` walks the
+week and classifies each day's habits, sleep, and screen time as `good / ok / bad / none`.
+A **slip** is any day where habits, study, or urges went bad. For each slip it looks
+at four upstream signals:
+
+- same-day sleep (bad sleep → habits slip is a classic same-day link)
+- same-day screen time
+- previous day's screen time (a late screen night causes the next morning's miss)
+- previous day's urges (a relapse the night before)
+
+If any of those were bad, the slip gets a cause. If none of them were, it goes into
+`unexplained_slips` — the retro never invents a cause. Auto-filled (defaulted)
+sleep/screen rows are explicitly excluded from being counted as evidence.
+
+The top 3 chains (ranked by number of upstream signals) are stored in `summary.chains`
+as structured JSON with ISO dates and weekday names. That's what both the fallback
+narrative and the LLM prompt operate on.
+
+### The trust pipeline
+
+```
+retro_engine.build_summary()   ← deterministic facts, no model involved
+        ↓
+narrate_structured()           ← LLM narrates ONLY from those facts
+        ↓
+_validate()                    ← cited_days must appear in the facts JSON,
+                                  tone gate rejects prescriptive language,
+                                  observation ≤ 450 chars, retried once
+        ↓
+fallback_narrative()           ← used if LLM is down OR validation fails twice
+```
+
+`narrated: false` in the response means the deterministic path ran — that's the
+safe outcome, not a failure. Tune `RETRO_TASK` in `voice_config.py` and bump
+`VOICE_VERSION` to iterate on narration quality.
+
+### Closing the feedback loop
+
+`GET /retros/latest` returns `pending_ratings`: insights from before this week
+that the user hasn't rated yet. `POST /retros/{week}/complete` marks the retro
+done and **then** calls `InsightsService.refresh()`, so the user's ratings are
+already in before new insights are generated.
+
+A soft gate in `InsightsService.refresh()` returns `rate_previous_first` when 3 or
+more insights older than 7 days are still unrated — the loop can't be silently ignored.
+
+### Known limits
+
+- **Chain tracer is deliberately simple.** It looks at 4 upstream signals. It won't
+  find anything subtler than that — `unexplained_slips` is the honest "I can't see why."
+- **Mission context is "now", not "then".** The active mission shown in a retro reflects
+  today's state, not the state during that week.
+- **LLM narration holds a DB connection during the LLM call**, same as insights.
+  Acceptable for now; fix with a background task when you scale.
+- **Study, urges, and Groq** are stubbed. The stubs satisfy the interface, so the
+  retro works end-to-end now (with `narrated: false`). Replace stubs slice by slice.
+
 ## Setup
 
 ```bash
