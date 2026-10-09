@@ -22,6 +22,10 @@ _PAIRS = (
     ("screen_time", "habits", 1, "A heavy screen day", "habits slipped the next day"),
     ("screen_time", "sleep", 1, "A heavy screen day", "bad sleep that night"),
     ("sleep", "screen_time", 0, "Bad sleep", "heavy screen time the same day"),
+    ("sleep", "study", 0, "Bad sleep", "study time dropped the same day"),
+    ("screen_time", "study", 1, "A heavy screen day", "study time dropped the next day"),
+    ("sleep", "urges", 0, "Bad sleep", "an urge relapsed the same day"),
+    ("screen_time", "urges", 1, "A heavy screen day", "an urge relapsed the next day"),
 )
 
 

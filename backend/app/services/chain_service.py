@@ -37,6 +37,8 @@ class ChainDay:
     screen_minutes: int | None
     sleep_defaulted: bool
     screen_time_defaulted: bool
+    study: str = NONE
+    urges: str = NONE
     habits_defaulted: bool = False
 
 
@@ -63,6 +65,30 @@ def screen_state(minutes: int | None, baseline: float | None) -> str:
         return NONE
     good_limit, ok_limit = (baseline, baseline * 1.25) if baseline is not None else _SCREEN_FALLBACK_MINUTES
     return GOOD if minutes <= good_limit else OK if minutes <= ok_limit else BAD
+
+
+def study_state(minutes: int) -> str:
+    return GOOD if minutes >= 120 else OK if minutes >= 45 else BAD if minutes > 0 else NONE
+
+
+def urge_state(outcomes: list[str]) -> str:
+    if not outcomes:
+        return NONE
+    return BAD if "relapsed" in outcomes else GOOD
+
+
+def study_states_by_day(sessions: list) -> dict[date, int]:
+    totals: dict[date, int] = {}
+    for s in sessions:
+        totals[s.log_date] = totals.get(s.log_date, 0) + s.actual_minutes
+    return totals
+
+
+def urge_states_by_day(logs: list) -> dict[date, list[str]]:
+    by_day: dict[date, list[str]] = {}
+    for l in logs:
+        by_day.setdefault(l.log_date, []).append(l.outcome)
+    return by_day
 
 
 def habit_day(habits: list[HabitDefinition], by_habit: dict[UUID, dict[date, HabitLog]], day: date):
@@ -97,6 +123,8 @@ def build_chain(
     screen_logs: list[ScreenTimeLog],
     start: date,
     end: date,
+    study_by_day: dict[date, int] | None = None,
+    urge_by_day: dict[date, list[str]] | None = None,
 ) -> list[ChainDay]:
     by_habit: dict[UUID, dict[date, HabitLog]] = {}
     for log in habit_logs:
@@ -110,9 +138,13 @@ def build_chain(
     while d <= end:
         habits_state, ratio, defaulted = habit_day(habits, by_habit, d)
         sleep_log, screen_log = sleep_by.get(d), screen_by.get(d)
+        study_mins = (study_by_day or {}).get(d, 0)
+        urge_outs = (urge_by_day or {}).get(d, [])
         days.append(ChainDay(
             day=d, habits=habits_state, sleep=sleep_state(sleep_log),
             screen_time=screen_state(screen_log.total_minutes if screen_log else None, baseline),
+            study=study_state(study_mins),
+            urges=urge_state(urge_outs),
             habit_ratio=ratio,
             sleep_minutes=sleep_log.duration_minutes if sleep_log else None,
             screen_minutes=screen_log.total_minutes if screen_log else None,

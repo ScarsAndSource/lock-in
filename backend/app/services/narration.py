@@ -94,8 +94,8 @@ async def narrate_structured(
 
 
 def sanitize_user_text(text: str, max_len: int, *, single_line: bool = False) -> str:
-    """Strip control chars, optionally collapse to one line, and truncate."""
-    out = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', '', text)
+    """Strip control chars, angle brackets (stop injection tags), optionally collapse to one line, and truncate."""
+    out = re.sub(r'[\x00-\x08\x0b-\x1f\x7f<>]', '', text)
     if single_line:
         out = re.sub(r'\s+', ' ', out).strip()
     return out[:max_len]
@@ -109,5 +109,9 @@ def fallback_next_step(pattern_key: str) -> str:
         "screen_time->sleep": "Set a hard app-limit for 9 pm tonight.",
         "sleep->screen_time": "After a bad night, keep screens off until you've eaten breakfast.",
         "urges->habits": "Log the urge the moment it happens — the habit slip comes later.",
+        "sleep->study": "Protect sleep before heavy study days — focus drops first when tired.",
+        "screen_time->study": "Set a screen limit on study eves to protect focus the next day.",
+        "sleep->urges": "Prioritise sleep on high-stress days to protect self-control.",
+        "screen_time->urges": "Cap evening scroll time; high screen time lowers urge resistance.",
     }
     return _STEPS.get(pattern_key, "Log every day next week, even rough numbers.")
