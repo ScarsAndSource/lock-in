@@ -7,7 +7,9 @@ from app.exceptions import ValidationError
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.screen_time_repository import ScreenTimeRepository
 from app.repositories.sleep_repository import SleepRepository
-from app.services.chain_service import ChainDay, build_chain
+from app.repositories.study_repository import StudySessionRepository
+from app.repositories.urge_repository import UrgeRepository
+from app.services.chain_service import ChainDay, build_chain, study_states_by_day, urge_states_by_day
 from app.services.consistency_service import HabitConsistency, compute_habit_consistency, overall_consistency
 from app.services.pattern_service import Pattern, find_patterns
 from app.services.profile_service import ProfileService
@@ -19,11 +21,14 @@ class StatsService:
     def __init__(
         self, habit_repo: HabitRepository, sleep_repo: SleepRepository,
         screen_repo: ScreenTimeRepository, profiles: ProfileService,
+        study_repo: StudySessionRepository | None = None, urge_repo: UrgeRepository | None = None,
     ):
         self._habits = habit_repo
         self._sleep = sleep_repo
         self._screen = screen_repo
         self._profiles = profiles
+        self._study = study_repo
+        self._urges = urge_repo
 
     async def _resolve_end(self, user_id: UUID, end_date: date | None) -> date:
         return end_date or await self._profiles.today(user_id)
@@ -52,7 +57,16 @@ class StatsService:
         )
         sleep_logs = await self._sleep.list_logs_in_range(user_id, start, end)
         screen_logs = await self._screen.list_logs_in_range(user_id, start, end)
-        return end, build_chain(habits, habit_logs, sleep_logs, screen_logs, start, end)
+        study_states = (
+            study_states_by_day(await self._study.list_in_range(user_id, start, end)) if self._study else None
+        )
+        urge_states = (
+            urge_states_by_day(await self._urges.list_in_range(user_id, start, end)) if self._urges else None
+        )
+        return end, build_chain(
+            habits, habit_logs, sleep_logs, screen_logs, start, end,
+            study_by_day=study_states, urge_by_day=urge_states,
+        )
 
     async def patterns(self, user_id: UUID, end_date: date | None, days: int) -> tuple[date, list[Pattern]]:
         end, chain = await self.chain(user_id, end_date, days)

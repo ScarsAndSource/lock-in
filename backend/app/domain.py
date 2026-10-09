@@ -226,3 +226,86 @@ class PatternInsight:
     model: str | None
     user_feedback: str | None = None
 
+
+@dataclass(slots=True)
+class Subject:
+    id: UUID
+    user_id: UUID
+    name: str
+    created_at: datetime
+    archived_at: datetime | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.archived_at is None
+
+
+@dataclass(slots=True)
+class StudySession:
+    id: UUID
+    user_id: UUID
+    subject_id: UUID
+    log_date: date
+    actual_minutes: int
+    planned_minutes: int | None = None
+
+
+class UrgeOutcome(str, Enum):
+    RESISTED = "resisted"
+    RELAPSED = "relapsed"
+
+
+@dataclass(slots=True)
+class UrgeLog:
+    """Free-text fields are held ENCRYPTED here; the service encrypts/decrypts."""
+    id: UUID
+    user_id: UUID
+    occurred_at: datetime
+    log_date: date
+    outcome: UrgeOutcome
+    intensity: int | None = None
+    trigger_context_encrypted: bytes | None = None
+    coping_strategy_encrypted: bytes | None = None
+    note_encrypted: bytes | None = None
+
+    @property
+    def has_detail(self) -> bool:
+        return any((
+            self.intensity, self.trigger_context_encrypted,
+            self.coping_strategy_encrypted, self.note_encrypted,
+        ))
+
+
+GOAL_DOMAINS = ("habit", "screen_time", "urge", "study", "sleep")
+
+
+class GoalStatus(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ACHIEVED = "achieved"
+    ARCHIVED = "archived"
+
+
+@dataclass(slots=True)
+class Goal:
+    id: UUID
+    user_id: UUID
+    domain: str
+    definition: str
+    target: dict
+    status: GoalStatus
+    created_at: datetime
+
+
+@dataclass(slots=True)
+class Intention:
+    id: UUID
+    user_id: UUID
+    linked_domain: str
+    cue: str
+    action: str
+    created_at: datetime
+    linked_entity_id: UUID | None = None
+    active: bool = True
+
+

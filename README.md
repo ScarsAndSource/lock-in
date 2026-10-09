@@ -14,9 +14,9 @@ never resets to zero on a miss. Full reasoning and data model: [SPEC.md](./SPEC.
 | 3. Sleep + screen-time domains | **Done** — `backend/` |
 | 3b. Missions (goal-scoped sprints) | **Done** — `backend/` |
 | 3c. Schedule service, consistency scoring, pattern detection, profile, account export/delete, rate limiting | **Done** — `backend/` |
-| 4. Study domain (`subjects` table) | Next |
-| 5. Urge domain (encrypted fields, quick-capture) | Next |
-| 6. Implementation intentions | Next |
+| 4. Study domain (`subjects` table) | **Done** — `backend/` |
+| 5. Urge domain (encrypted fields, quick-capture) | **Done** — `backend/` |
+| 6. Implementation intentions | **Done** — `backend/` |
 | 7. Groq pattern insights + check-in chat (crisis fallback required) | Next |
 | 8. Weekly retrospective + insight feedback loop | **Done** — `backend/` |
 | 9. Chain visualization | Next |
@@ -27,15 +27,15 @@ never resets to zero on a miss. Full reasoning and data model: [SPEC.md](./SPEC.
 ```
 lockin/
   SPEC.md              -- source of truth, read this first
-  backend/             -- FastAPI app (backend slices 1, 3, 3b, 3c, 8 complete)
+  backend/             -- FastAPI app (backend slices 1, 3, 3b, 3c, 4, 5, 6, 8 complete)
     app/
       domain.py         -- plain dataclasses, no DB dependency
-      services/         -- business logic (defaults engine, consistency, chains, patterns, retros, insights)
+      services/         -- business logic (defaults engine, consistency, chains, patterns, retros, insights, study, urges, goals, intentions)
       repositories/      -- DB access, isolated behind Protocol interfaces
       routers/           -- HTTP endpoints
       security.py         -- JWT verification + field-level encryption
     migrations/          -- raw SQL, run manually against Supabase
-    tests/               -- 131 passing tests, see backend/README.md
+    tests/               -- 136 passing tests, see backend/README.md
   frontend/            -- not created yet (slice 2)
 ```
 

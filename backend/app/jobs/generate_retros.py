@@ -31,6 +31,9 @@ from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
 from app.repositories.screen_time_repository import SqlAlchemyScreenTimeRepository
 from app.repositories.sleep_repository import SqlAlchemySleepRepository
+from app.repositories.study_repository import SqlAlchemyStudySessionRepository, SqlAlchemySubjectRepository
+from app.repositories.urge_repository import SqlAlchemyUrgeRepository
+from app.security import FieldEncryptor
 from app.services.insights_service import InsightsService
 from app.services.llm import GroqClient, LLMClient
 from app.services.missions_service import MissionsService
@@ -65,12 +68,16 @@ async def active_user_ids(
 
 def build_retro_service(session, llm: LLMClient, settings: Settings, clock: Clock = utc_now) -> RetroService:
     profiles = ProfileService(SqlAlchemyProfileRepository(session), clock)
+    study_repo = SqlAlchemyStudySessionRepository(session)
+    subject_repo = SqlAlchemySubjectRepository(session)
+    urge_repo = SqlAlchemyUrgeRepository(session)
     stats = StatsService(
         SqlAlchemyHabitRepository(session), SqlAlchemySleepRepository(session),
         SqlAlchemyScreenTimeRepository(session), profiles,
+        study_repo=study_repo, urge_repo=urge_repo,
     )
-    study = StudyService()
-    urges = UrgesService()
+    study = StudyService(study_repo, subject_repo, clock)
+    urges = UrgesService(urge_repo, FieldEncryptor(settings.field_encryption_key), clock)
     missions = MissionsService(SqlAlchemyMissionRepository(session), stats, profiles, clock)
     insights = InsightsService(SqlAlchemyInsightRepository(session), stats, clock)
     return RetroService(

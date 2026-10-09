@@ -15,11 +15,12 @@ from uuid import UUID
 
 from app.dates import Clock, assert_loggable_date, utc_now
 from app.domain import (
-    DailyCheckin, HabitLog, HabitStatus, ScreenTimeLog, ScreenTimeProposal,
+    DailyCheckin, GoalStatus, HabitLog, HabitStatus, ScreenTimeLog, ScreenTimeProposal,
     ScreenTimeSource, SleepLog, SleepProposal,
 )
 from app.exceptions import DataIntegrityError, NotFoundError
 from app.repositories.checkin_repository import CheckinRepository
+from app.repositories.goal_repository import GoalRepository
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.screen_time_repository import ScreenTimeRepository
 from app.repositories.sleep_repository import SleepRepository
@@ -27,6 +28,17 @@ from app.security import FieldEncryptor
 from app.services.defaults_service import compute_habit_defaults, compute_screen_time_default, compute_sleep_default
 
 _PROPOSAL_LOOKBACK_DAYS = 30
+
+
+def _parse_time(val: str | time | None) -> time | None:
+    if val is None:
+        return None
+    if isinstance(val, time):
+        return val
+    try:
+        return time.fromisoformat(val)
+    except ValueError:
+        return None
 
 
 @dataclass(slots=True)
@@ -76,6 +88,7 @@ class CheckinsService:
     def __init__(
         self, habit_repo: HabitRepository, checkin_repo: CheckinRepository, encryptor: FieldEncryptor,
         sleep_repo: SleepRepository, screen_repo: ScreenTimeRepository, clock: Clock = utc_now,
+        goals: GoalRepository | None = None,
     ):
         self._habits = habit_repo
         self._checkins = checkin_repo
@@ -83,6 +96,7 @@ class CheckinsService:
         self._sleep = sleep_repo
         self._screen = screen_repo
         self._clock = clock
+        self._goals = goals
 
     # ------------------------------------------------------------ read
     async def get_view(self, user_id: UUID, target_date: date) -> CheckinView:
@@ -221,13 +235,37 @@ class CheckinsService:
         history = await self._sleep.list_logs_in_range(
             user_id, target_date - timedelta(days=_PROPOSAL_LOOKBACK_DAYS), target_date - timedelta(days=1)
         )
-        return compute_sleep_default(history, target_date)
+        prop = compute_sleep_default(history, target_date)
+        if prop is not None:
+            return prop
+        if self._goals is not None:
+            active_goals = await self._goals.list(user_id, GoalStatus.ACTIVE)
+            for g in active_goals:
+                if g.domain == "sleep" and (g.target.get("bedtime") or g.target.get("wake")):
+                    bed_t = _parse_time(g.target.get("bedtime"))
+                    woke_t = _parse_time(g.target.get("wake"))
+                    return SleepProposal(
+                        time_to_bed=bed_t, time_woke=woke_t, self_rated_quality=4,
+                        based_on_count=0, is_low_confidence=True, reason="Fallback to active sleep goal target",
+                    )
+        return None
 
     async def _screen_proposal(self, user_id: UUID, target_date: date) -> ScreenTimeProposal | None:
         history = await self._screen.list_logs_in_range(
             user_id, target_date - timedelta(days=_PROPOSAL_LOOKBACK_DAYS), target_date - timedelta(days=1)
         )
-        return compute_screen_time_default(history, target_date)
+        prop = compute_screen_time_default(history, target_date)
+        if prop is not None:
+            return prop
+        if self._goals is not None:
+            active_goals = await self._goals.list(user_id, GoalStatus.ACTIVE)
+            for g in active_goals:
+                if g.domain == "screen_time" and "max_minutes_per_day" in g.target:
+                    return ScreenTimeProposal(
+                        total_minutes=g.target["max_minutes_per_day"],
+                        based_on_count=0, is_low_confidence=True, reason="Fallback to active screen time goal target",
+                    )
+        return None
 
     async def _build_entries(self, user_id: UUID, habits, target_date: date) -> list[CheckinEntry]:
         if not habits:

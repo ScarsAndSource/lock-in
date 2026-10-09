@@ -129,6 +129,9 @@ class InMemoryProfileRepository:
     async def get_or_create(self, user_id: UUID) -> Profile:
         return self._profiles.setdefault(user_id, Profile(user_id=user_id, timezone="UTC", tone_preference="direct"))
 
+    async def get(self, user_id: UUID) -> Profile:
+        return await self.get_or_create(user_id)
+
     async def set_timezone(self, user_id: UUID, tz_name: str) -> Profile:
         profile = await self.get_or_create(user_id)
         profile.timezone = tz_name

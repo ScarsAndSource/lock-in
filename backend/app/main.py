@@ -12,7 +12,10 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import engine, ping_database
 from app.exceptions import ConflictError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError
-from app.routers import checkins, habits, insights, missions, profile, retros, screen_time, sleep, stats
+from app.routers import (
+    checkins, goals, habits, insights, intentions, missions, profile, retros, screen_time, sleep, stats,
+    study, urges,
+)
 from app.schema_check import check_schema
 
 settings = get_settings()
@@ -112,5 +115,8 @@ async def ready():
     return {"status": "ready"}
 
 
-for module in (habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights):
+for module in (
+    habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
+    study, urges, goals, intentions,
+):
     app.include_router(module.router)

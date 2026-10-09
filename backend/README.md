@@ -8,10 +8,10 @@
 | 3 | Sleep + screen-time logging, basic stats | ✅ Done |
 | 3b | Missions (goal-scoped sprints) | ✅ Done |
 | 3c | Schedule service, consistency scoring, pattern detection, profile, account export/delete, rate limiting | ✅ Done |
+| 4 | Study sessions (`subjects` + `study_sessions`) | ✅ Done |
+| 5 | Urge / relapse logging (encrypted free-text) | ✅ Done |
+| 6 | Goals & Implementation intentions (If-then plans) | ✅ Done |
 | 8 | Weekly retrospective — chain tracing, LLM narration, feedback loop, daily cron job | ✅ Done |
-| 4 | Study sessions | 🔜 Next |
-| 5 | Urge / relapse logging | 🔜 Next |
-| 6 | If-then plans / implementation intentions | 🔜 Next |
 | 7 | Groq insight layer (full wiring) | 🔜 Next |
 
 ## Endpoints (current)
@@ -36,6 +36,29 @@ POST   /screen-time/logs             create/upsert screen-time log
 GET    /screen-time/logs/{date}      get screen-time log for a date
 GET    /screen-time/logs             list screen-time logs (?start_date=&end_date=)
 DELETE /screen-time/logs/{date}      delete screen-time log for a date
+
+GET    /study/subjects               list study subjects
+POST   /study/subjects               create study subject
+PATCH  /study/subjects/{id}          rename / archive subject
+POST   /study/sessions               log study session
+GET    /study/sessions               list study sessions (?start_date=&end_date=)
+DELETE /study/sessions/{id}          delete study session
+
+POST   /urges/quick-capture          quick-capture urge log (resisted/relapsed)
+POST   /urges/{id}/detail            add/update encrypted urge details
+GET    /urges                        list urge logs (?start_date=&end_date=)
+DELETE /urges/{id}                   delete urge log
+
+POST   /goals                        create goal across domains
+GET    /goals                        list goals (?status=)
+PATCH  /goals/{id}                   update goal status/target
+GET    /goals/progress               get goal progress metrics
+
+POST   /intentions                   create implementation intention (if-then plan)
+GET    /intentions                   list implementation intentions (?domain=&active_only=)
+GET    /intentions/due               list due intentions for surfacing
+PATCH  /intentions/{id}              update intention cue/action/status
+DELETE /intentions/{id}              delete implementation intention
 
 GET    /stats/consistency            rolling consistency score (?end_date=&window_days=)
 GET    /stats/chain                  multi-domain chain strip (?end_date=&days=)
@@ -121,7 +144,7 @@ more insights older than 7 days are still unrated — the loop can't be silently
   today's state, not the state during that week.
 - **LLM narration holds a DB connection during the LLM call**, same as insights.
   Acceptable for now; fix with a background task when you scale.
-- **Study, urges, and Groq** are stubbed. The stubs satisfy the interface, so the
+- **Groq** is stubbed. The stubs satisfy the interface, so the
   retro works end-to-end now (with `narrated: false`). Replace stubs slice by slice.
 
 ## Setup
@@ -139,6 +162,9 @@ Run migrations against your Supabase project's SQL editor (or `psql`) in order:
 migrations/001_init_habit_and_checkin.sql
 migrations/002_sleep_and_screen_time.sql
 migrations/003_missions_defaults_grants.sql
+migrations/004_study.sql
+migrations/005_urges.sql
+migrations/006_goals_and_intentions.sql
 migrations/007_weekly_retros.sql
 migrations/008_pattern_insights.sql
 ```
@@ -164,7 +190,7 @@ at different times. Generation is idempotent — one retro per user per week.
 python -m pytest -v
 ```
 
-Tests use fully in-memory fakes — no database or network required. All 131 tests passing across unit, service, security, and API integration suites.
+Tests use fully in-memory fakes — no database or network required. All 136 tests passing across unit, service, security, and API integration suites.
 
 ## What has NOT been verified against a live database
 

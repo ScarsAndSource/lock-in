@@ -17,9 +17,11 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.deps import (  # noqa: E402
-    get_account_repository, get_checkin_repository, get_clock, get_habit_repository,
-    get_insights_service, get_llm_client, get_mission_repository, get_profile_repository,
-    get_retro_repository, get_screen_time_repository, get_sleep_repository,
+    get_account_repository, get_checkin_repository, get_clock, get_goal_repository,
+    get_habit_repository, get_insights_service, get_intention_repository,
+    get_llm_client, get_mission_repository, get_profile_repository, get_retro_repository,
+    get_screen_time_repository, get_sleep_repository, get_study_session_repository,
+    get_subject_repository, get_urge_repository,
 )
 from app.main import app  # noqa: E402
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor  # noqa: E402
@@ -30,6 +32,10 @@ from tests.fakes import (  # noqa: E402
     InMemoryAccountRepository, InMemoryCheckinRepository, InMemoryHabitRepository,
     InMemoryMissionRepository, InMemoryProfileRepository, InMemoryRetroRepository,
     InMemoryScreenTimeRepository, InMemorySleepRepository,
+)
+from tests.fakes_slices import (  # noqa: E402
+    InMemoryGoalRepository, InMemoryIntentionRepository, InMemoryStudySessionRepository,
+    InMemorySubjectRepository, InMemoryUrgeRepository,
 )
 
 FIXED_NOW = datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc)
@@ -66,6 +72,11 @@ class ApiWorld:
         self.profile_repo = InMemoryProfileRepository()
         self.mission_repo = InMemoryMissionRepository()
         self.retro_repo = InMemoryRetroRepository()
+        self.subject_repo = InMemorySubjectRepository()
+        self.study_repo = InMemoryStudySessionRepository()
+        self.urge_repo = InMemoryUrgeRepository()
+        self.goal_repo = InMemoryGoalRepository()
+        self.intention_repo = InMemoryIntentionRepository()
         self.account_repo = InMemoryAccountRepository(
             self.habit_repo, self.checkin_repo, self.sleep_repo,
             self.screen_time_repo, self.mission_repo, self.profile_repo, self.retro_repo,
@@ -83,6 +94,11 @@ class ApiWorld:
         app.dependency_overrides[get_mission_repository] = lambda: self.mission_repo
         app.dependency_overrides[get_retro_repository] = lambda: self.retro_repo
         app.dependency_overrides[get_account_repository] = lambda: self.account_repo
+        app.dependency_overrides[get_subject_repository] = lambda: self.subject_repo
+        app.dependency_overrides[get_study_session_repository] = lambda: self.study_repo
+        app.dependency_overrides[get_urge_repository] = lambda: self.urge_repo
+        app.dependency_overrides[get_goal_repository] = lambda: self.goal_repo
+        app.dependency_overrides[get_intention_repository] = lambda: self.intention_repo
         app.dependency_overrides[get_field_encryptor] = lambda: self.encryptor
         app.dependency_overrides[get_clock] = lambda: self._clock
         app.dependency_overrides[get_llm_client] = lambda: self.llm
