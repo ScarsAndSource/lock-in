@@ -58,6 +58,22 @@ def test_last_weeks_logs_do_not_count_toward_this_weeks_quota():
     assert _default(habit, logs).is_scheduled is True
 
 
+def test_habit_default_ignores_autofilled_default_logs():
+    import datetime as dt
+    habit = _habit(TargetFrequency(type="weekdays", days=(3,)))  # Thursday
+    # 3 prior Thursdays, but ALL are auto-filled defaults (is_default=True)
+    logs = [
+        HabitLog(habit_id=habit.id, user_id=USER, log_date=THURSDAY - dt.timedelta(weeks=w),
+                 status=HabitStatus.SKIPPED, is_default=True)
+        for w in (1, 2, 3)
+    ]
+    res = _default(habit, logs)
+    # Since guesses are excluded from evidence, occurrence_count is 0 -> remains low confidence
+    assert res.based_on_count == 0
+    assert res.is_low_confidence is True
+    assert res.status == HabitStatus.DONE
+
+
 def _sleep(d, bed, wake, quality, is_default=False):
     return SleepLog(user_id=USER, log_date=d, time_to_bed=bed, time_woke=wake,
                     self_rated_quality=quality, is_default=is_default)

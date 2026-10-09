@@ -1,9 +1,10 @@
 """
 "Same as usual" defaults for the opt-out daily check-in.
 
-HABITS: same-weekday history, last 4 occurrences, majority wins, tie -> most
-recent; <2 occurrences -> optimistic DONE flagged low-confidence. NEW: rest
-days (see schedule.py) propose nothing.
+HABITS: same-weekday history of REAL logs (is_default rows excluded so
+guesses never count as evidence or feed on themselves), last 4 occurrences,
+majority wins, tie -> most recent; <2 occurrences -> optimistic DONE flagged
+low-confidence. Rest days (see schedule.py) propose nothing.
 
 SLEEP / SCREEN TIME: median of the last 7 REAL logs. Auto-filled (is_default)
 rows are excluded from the basis so a guess can never feed on itself and turn
@@ -55,7 +56,7 @@ def _compute_single_default(habit: HabitDefinition, history: list[HabitLog], tar
         )
 
     same_weekday_logs = sorted(
-        (log for log in history if log.log_date.weekday() == target_date.weekday() and log.log_date < target_date),
+        (log for log in history if not log.is_default and log.log_date.weekday() == target_date.weekday() and log.log_date < target_date),
         key=lambda log: log.log_date,
         reverse=True,
     )[:_LOOKBACK_OCCURRENCES]
