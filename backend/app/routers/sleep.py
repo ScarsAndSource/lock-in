@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.deps import get_sleep_service
 from app.ratelimit import rate_limit
@@ -46,3 +46,13 @@ async def list_sleep_logs(
     service: SleepService = Depends(get_sleep_service),
 ) -> list[SleepLogOut]:
     return [sleep_out(l) for l in await service.list_recent(user_id, start_date, end_date)]
+
+
+@router.delete("/logs/{log_date}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_sleep_log(
+    log_date: date,
+    user_id: UUID = Depends(get_current_user_id),
+    service: SleepService = Depends(get_sleep_service),
+) -> Response:
+    await service.delete_log(user_id, log_date)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

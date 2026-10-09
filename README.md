@@ -30,12 +30,12 @@ lockin/
   backend/             -- FastAPI app (backend slices 1, 3, 3b, 3c, 8 complete)
     app/
       domain.py         -- plain dataclasses, no DB dependency
-      services/         -- business logic (defaults engine, consistency, chains, patterns, retros)
+      services/         -- business logic (defaults engine, consistency, chains, patterns, retros, insights)
       repositories/      -- DB access, isolated behind Protocol interfaces
       routers/           -- HTTP endpoints
       security.py         -- JWT verification + field-level encryption
     migrations/          -- raw SQL, run manually against Supabase
-    tests/               -- 114 passing tests, see backend/README.md
+    tests/               -- 131 passing tests, see backend/README.md
   frontend/            -- not created yet (slice 2)
 ```
 

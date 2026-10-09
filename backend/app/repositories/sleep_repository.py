@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,8 @@ class SleepRepository(Protocol):
     async def list_logs_in_range(
         self, user_id: UUID, start_date: date, end_date: date
     ) -> list[SleepLog]: ...
+
+    async def delete_log(self, user_id: UUID, log_date: date) -> bool: ...
 
 
 def _log_from_orm(row: SleepLogORM) -> SleepLog:
@@ -90,3 +92,9 @@ class SqlAlchemySleepRepository:
         )
         result = await self._session.execute(stmt)
         return [_log_from_orm(row) for row in result.scalars().all()]
+
+    async def delete_log(self, user_id: UUID, log_date: date) -> bool:
+        result = await self._session.execute(
+            delete(SleepLogORM).where(SleepLogORM.user_id == user_id, SleepLogORM.log_date == log_date)
+        )
+        return (result.rowcount or 0) > 0

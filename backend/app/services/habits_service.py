@@ -25,16 +25,24 @@ class HabitsService:
         return await self._habits.list_active_habits(user_id)
 
     async def update_habit(
-        self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None
+        self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None,
+        target_frequency: TargetFrequency | None = None,
     ) -> HabitDefinition:
         if name is not None and not name.strip():
             raise ValidationError("Habit name can't be blank.")
         habit = await self._habits.update_habit(
-            user_id, habit_id, name.strip() if name is not None else None, archived, self._clock()
+            user_id, habit_id, name.strip() if name is not None else None, archived, self._clock(),
+            target_frequency=target_frequency,
         )
         if habit is None:
             raise NotFoundError(f"No habit {habit_id} for this user.")
         return habit
+
+    async def delete_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> None:
+        if await self._habits.get_habit(user_id, habit_id) is None:
+            raise NotFoundError(f"No habit {habit_id} for this user.")
+        if not await self._habits.delete_log(user_id, habit_id, log_date):
+            raise NotFoundError("No log for that habit on that date.")
 
     async def log_habit(
         self, user_id: UUID, habit_id: UUID, log_date: date, status: HabitStatus, note: str | None

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from app.dates import Clock, assert_loggable_date, utc_now
 from app.domain import SleepLog
-from app.exceptions import ValidationError
+from app.exceptions import NotFoundError, ValidationError
 from app.repositories.sleep_repository import SleepRepository
 
 _MAX_RANGE_DAYS = 90
@@ -28,6 +28,10 @@ class SleepService:
 
     async def get_log(self, user_id: UUID, log_date: date) -> SleepLog | None:
         return await self._repo.get_log(user_id, log_date)
+
+    async def delete_log(self, user_id: UUID, log_date: date) -> None:
+        if not await self._repo.delete_log(user_id, log_date):
+            raise NotFoundError("No sleep log for this date.")
 
     async def list_recent(self, user_id: UUID, start_date: date, end_date: date) -> list[SleepLog]:
         if end_date < start_date:

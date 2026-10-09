@@ -38,11 +38,12 @@ class HabitCreateRequest(BaseModel):
 class HabitPatchRequest(BaseModel):
     name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
     archived: bool | None = None
+    target_frequency: TargetFrequencyIn | None = None
 
     @model_validator(mode="after")
     def _at_least_one(self) -> "HabitPatchRequest":
-        if self.name is None and self.archived is None:
-            raise ValueError("Provide at least one of: name, archived")
+        if self.name is None and self.archived is None and self.target_frequency is None:
+            raise ValueError("Provide at least one of: name, archived, target_frequency")
         return self
 
 
@@ -85,11 +86,30 @@ class SleepLogOut(BaseModel):
 
 
 # ---------------------------------------------------------------- screen time
+_MAX_BREAKDOWN_KEYS = 30
+
+
+def _validate_breakdown(v: dict | None) -> dict | None:
+    """{category: minutes}: <=30 keys, names 1-40 chars, whole minutes 0-1440. No free-form blobs."""
+    if v is None:
+        return v
+    if len(v) > _MAX_BREAKDOWN_KEYS:
+        raise ValueError(f"category_breakdown can have at most {_MAX_BREAKDOWN_KEYS} categories")
+    for key, minutes in v.items():
+        if not isinstance(key, str) or not 1 <= len(key) <= 40:
+            raise ValueError("category names must be 1-40 characters")
+        if isinstance(minutes, bool) or not isinstance(minutes, int) or not 0 <= minutes <= 1440:
+            raise ValueError("category minutes must be whole numbers between 0 and 1440")
+    return v
+
+
 class ScreenTimeLogRequest(BaseModel):
     log_date: date
-    total_minutes: Annotated[int, Field(ge=0)]
+    total_minutes: Annotated[int, Field(ge=0, le=1440)]
     source: ScreenTimeSource
     category_breakdown: dict | None = None
+
+    _check_breakdown = field_validator("category_breakdown")(_validate_breakdown)
 
 
 class ScreenTimeLogOut(BaseModel):
@@ -167,6 +187,8 @@ class ScreenTimeEntryIn(BaseModel):
     total_minutes: Annotated[int, Field(ge=0, le=1440)]
     source: ScreenTimeSource = ScreenTimeSource.MANUAL
     category_breakdown: dict | None = None
+
+    _check_breakdown = field_validator("category_breakdown")(_validate_breakdown)
 
 
 class CheckinConfirmRequest(BaseModel):

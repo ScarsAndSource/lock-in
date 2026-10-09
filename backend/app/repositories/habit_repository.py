@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,10 @@ class HabitRepository(Protocol):
 
     async def update_habit(
         self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
+        target_frequency: TargetFrequency | None = None,
     ) -> HabitDefinition | None: ...
+
+    async def delete_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> bool: ...
 
     async def get_recent_logs_by_habit(
         self, user_id: UUID, habit_ids: list[UUID], before_date: date,
@@ -123,6 +126,7 @@ class SqlAlchemyHabitRepository:
 
     async def update_habit(
         self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
+        target_frequency: TargetFrequency | None = None,
     ) -> HabitDefinition | None:
         stmt = select(HabitDefinitionORM).where(
             HabitDefinitionORM.id == habit_id, HabitDefinitionORM.user_id == user_id
@@ -136,9 +140,21 @@ class SqlAlchemyHabitRepository:
             row.archived_at = now
         elif archived is False:
             row.archived_at = None
+        if target_frequency is not None:
+            row.target_frequency = _frequency_to_dict(target_frequency)
         row.updated_at = now
         await self._session.flush()
         return _habit_from_orm(row)
+
+    async def delete_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> bool:
+        result = await self._session.execute(
+            delete(HabitLogORM).where(
+                HabitLogORM.user_id == user_id,
+                HabitLogORM.habit_id == habit_id,
+                HabitLogORM.log_date == log_date,
+            )
+        )
+        return (result.rowcount or 0) > 0
 
     async def get_recent_logs_by_habit(
         self, user_id: UUID, habit_ids: list[UUID], before_date: date,

@@ -34,7 +34,7 @@ class InMemoryHabitRepository:
         habit = self._habits.get(habit_id)
         return habit if habit is not None and habit.user_id == user_id else None
 
-    async def update_habit(self, user_id, habit_id, name, archived, now) -> HabitDefinition | None:
+    async def update_habit(self, user_id, habit_id, name, archived, now, target_frequency=None) -> HabitDefinition | None:
         habit = await self.get_habit(user_id, habit_id)
         if habit is None:
             return None
@@ -44,6 +44,8 @@ class InMemoryHabitRepository:
             habit.archived_at = now
         elif archived is False:
             habit.archived_at = None
+        if target_frequency is not None:
+            habit.target_frequency = target_frequency
         return habit
 
     async def get_recent_logs_by_habit(
@@ -70,6 +72,13 @@ class InMemoryHabitRepository:
     async def upsert_log(self, log: HabitLog) -> HabitLog:
         self._logs[(log.habit_id, log.log_date)] = log
         return log
+
+    async def delete_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> bool:
+        log = self._logs.get((habit_id, log_date))
+        if log is None or log.user_id != user_id:
+            return False
+        del self._logs[(habit_id, log_date)]
+        return True
 
 
 class InMemoryCheckinRepository:
@@ -100,6 +109,9 @@ class _RangeLogRepo:
             [l for (uid, d), l in self._logs.items() if uid == user_id and start_date <= d <= end_date],
             key=lambda l: l.log_date,
         )
+
+    async def delete_log(self, user_id: UUID, log_date: date) -> bool:
+        return self._logs.pop((user_id, log_date), None) is not None
 
 
 class InMemorySleepRepository(_RangeLogRepo):

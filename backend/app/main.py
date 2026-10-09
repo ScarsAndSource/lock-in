@@ -12,12 +12,13 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import engine, ping_database
 from app.exceptions import ConflictError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError
-from app.routers import checkins, habits, missions, profile, retros, screen_time, sleep, stats
+from app.routers import checkins, habits, insights, missions, profile, retros, screen_time, sleep, stats
 from app.schema_check import check_schema
 
 settings = get_settings()
 logger = logging.getLogger("lockin")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
+_MAX_BODY_BYTES = 256 * 1024
 
 
 @asynccontextmanager
@@ -43,6 +44,11 @@ async def request_context(request: Request, call_next):
     incoming = request.headers.get("x-request-id", "")
     request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
     request.state.request_id = request_id
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > _MAX_BODY_BYTES:
+        return JSONResponse(
+            status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
+        )
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers.setdefault("Cache-Control", "no-store")  # personal data: never cache
@@ -106,5 +112,5 @@ async def ready():
     return {"status": "ready"}
 
 
-for module in (habits, checkins, sleep, screen_time, stats, missions, profile, retros):
+for module in (habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights):
     app.include_router(module.router)

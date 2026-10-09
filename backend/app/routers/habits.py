@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.deps import get_habits_service
 from app.domain import TargetFrequency
@@ -47,8 +48,10 @@ async def update_habit(
     user_id: UUID = Depends(get_current_user_id),
     service: HabitsService = Depends(get_habits_service),
 ) -> HabitOut:
-    """Rename and/or archive/unarchive. History is kept; archived habits leave the check-in."""
-    return habit_out(await service.update_habit(user_id, habit_id, body.name, body.archived))
+    """Rename, archive/unarchive, and/or change the schedule. Past logs are kept; consistency
+    for past windows is read under the CURRENT schedule."""
+    freq = _to_domain_frequency(body.target_frequency) if body.target_frequency is not None else None
+    return habit_out(await service.update_habit(user_id, habit_id, body.name, body.archived, freq))
 
 
 @router.post("/{habit_id}/logs", response_model=HabitLogOut, status_code=status.HTTP_200_OK)
@@ -63,3 +66,15 @@ async def log_habit(
     return HabitLogOut(
         habit_id=log.habit_id, log_date=log.log_date, status=log.status, note=log.note, is_default=log.is_default,
     )
+
+
+@router.delete("/{habit_id}/logs/{log_date}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_habit_log(
+    habit_id: UUID,
+    log_date: date,
+    user_id: UUID = Depends(get_current_user_id),
+    service: HabitsService = Depends(get_habits_service),
+) -> Response:
+    """Un-log a day. Tomorrow's check-in will propose a default for it again."""
+    await service.delete_log(user_id, habit_id, log_date)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

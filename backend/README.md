@@ -19,8 +19,9 @@
 ```
 POST   /habits                       create habit
 GET    /habits                       list habits (?include_archived=bool)
-PATCH  /habits/{id}                  update habit (rename / archive / unarchive)
+PATCH  /habits/{id}                  update habit (rename / archive / unarchive / schedule)
 POST   /habits/{id}/logs             log habit status for a date (upsert)
+DELETE /habits/{id}/logs/{date}      un-log habit status for a date
 
 GET    /checkins/{date}/defaults     compute opt-out defaults for date
 POST   /checkins/{date}/confirm      confirm check-in (habits + sleep + screen + journal)
@@ -29,14 +30,20 @@ GET    /checkins/{date}/journal      get decrypted journal for date
 POST   /sleep/logs                   create/upsert sleep log
 GET    /sleep/logs/{date}            get sleep log for a date
 GET    /sleep/logs                   list sleep logs (?start_date=&end_date=)
+DELETE /sleep/logs/{date}            delete sleep log for a date
 
 POST   /screen-time/logs             create/upsert screen-time log
 GET    /screen-time/logs/{date}      get screen-time log for a date
 GET    /screen-time/logs             list screen-time logs (?start_date=&end_date=)
+DELETE /screen-time/logs/{date}      delete screen-time log for a date
 
 GET    /stats/consistency            rolling consistency score (?end_date=&window_days=)
 GET    /stats/chain                  multi-domain chain strip (?end_date=&days=)
 GET    /stats/patterns               detected cross-domain patterns (?end_date=&days=)
+
+POST   /insights/refresh             refresh pattern insights
+GET    /insights                     list pattern insights (?unrated_only=bool&limit=int)
+POST   /insights/{id}/feedback       rate pattern insight (accurate, not_quite, unsure)
 
 POST   /missions                     create a mission
 GET    /missions                     list missions
@@ -133,6 +140,7 @@ migrations/001_init_habit_and_checkin.sql
 migrations/002_sleep_and_screen_time.sql
 migrations/003_missions_defaults_grants.sql
 migrations/007_weekly_retros.sql
+migrations/008_pattern_insights.sql
 ```
 
 ```bash
@@ -156,7 +164,7 @@ at different times. Generation is idempotent — one retro per user per week.
 python -m pytest -v
 ```
 
-Tests use fully in-memory fakes — no database or network required. All 114 tests passing across unit, service, security, and API integration suites.
+Tests use fully in-memory fakes — no database or network required. All 131 tests passing across unit, service, security, and API integration suites.
 
 ## What has NOT been verified against a live database
 
