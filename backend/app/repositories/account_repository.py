@@ -1,4 +1,12 @@
-"""Whole-account export and delete (SPEC section 9, decision 4)."""
+"""
+Whole-account export and delete (SPEC section 9, decision 4).
+
+Coverage is DERIVED from the ORM metadata, never hand-listed:
+  - every table in Base.metadata (except Supabase's auth.*) is exported and deleted
+  - the owner column is `user_id`, or `id` for profiles
+  - a table with no recognised owner column raises at import -> app won't boot
+  - deliberate exceptions go in _EXEMPT_TABLES, each with a comment saying why
+"""
 from __future__ import annotations
 
 import base64
@@ -7,21 +15,35 @@ from enum import Enum
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import delete, inspect as sa_inspect, select
+from sqlalchemy import Table, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    DailyCheckinORM, HabitDefinitionORM, HabitLogORM, MissionORM,
-    ProfileORM, ScreenTimeLogORM, SleepLogORM, WeeklyRetroORM,
-)
+from app.models import Base
 
-# (model, owner column). Delete order: children before parents.
-_TABLES = [
-    (HabitLogORM, "user_id"), (DailyCheckinORM, "user_id"), (SleepLogORM, "user_id"),
-    (ScreenTimeLogORM, "user_id"), (MissionORM, "user_id"), (WeeklyRetroORM, "user_id"),
-    (HabitDefinitionORM, "user_id"), (ProfileORM, "id"),
-]
+_EXEMPT_TABLES: frozenset[str] = frozenset()
 
+
+def _owner_column(table: Table) -> str:
+    if "user_id" in table.c:
+        return "user_id"
+    if table.name == "profiles":
+        return "id"
+    raise RuntimeError(
+        f"Table {table.name!r} has no 'user_id' column, so account export/delete can't scope it to a user. "
+        "Add user_id, or add the table to _EXEMPT_TABLES with a written reason."
+    )
+
+
+def owned_tables() -> list[tuple[Table, str]]:
+    """(table, owner column), PARENTS FIRST. Reverse it for deletes (children first)."""
+    return [
+        (t, _owner_column(t))
+        for t in Base.metadata.sorted_tables
+        if t.schema != "auth" and t.name not in _EXEMPT_TABLES
+    ]
+
+
+owned_tables()  # tripwire: fails at import if any table can't be scoped
 
 
 def json_safe(value: Any) -> Any:
@@ -52,17 +74,14 @@ class SqlAlchemyAccountRepository:
 
     async def export(self, user_id: UUID) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
-        for model, owner_col in reversed(_TABLES):
-            rows = (await self._session.execute(
-                select(model).where(getattr(model, owner_col) == user_id)
-            )).scalars().all()
-            keys = [a.key for a in sa_inspect(model).column_attrs]
-            out[model.__tablename__] = [{k: json_safe(getattr(r, k)) for k in keys} for r in rows]
+        for table, owner in owned_tables():
+            result = await self._session.execute(select(table).where(table.c[owner] == user_id))
+            out[table.name] = [{k: json_safe(v) for k, v in row.items()} for row in result.mappings().all()]
         return out
 
     async def delete_everything(self, user_id: UUID) -> dict[str, int]:
         counts: dict[str, int] = {}
-        for model, owner_col in _TABLES:
-            result = await self._session.execute(delete(model).where(getattr(model, owner_col) == user_id))
-            counts[model.__tablename__] = result.rowcount or 0
+        for table, owner in reversed(owned_tables()):
+            result = await self._session.execute(delete(table).where(table.c[owner] == user_id))
+            counts[table.name] = result.rowcount or 0
         return counts

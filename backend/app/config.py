@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = Field(default=120, ge=1)
     rate_limit_export_per_hour: int = Field(default=5, ge=1)
+    rate_limit_insights_refresh_per_hour: int = Field(default=10, ge=1)
 
     @model_validator(mode="after")
     def _check_auth_config(self) -> "Settings":

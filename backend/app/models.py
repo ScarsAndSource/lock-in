@@ -13,7 +13,7 @@ from sqlalchemy import (
     CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary,
     SmallInteger, Text, Time, UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -164,4 +164,29 @@ class WeeklyRetroORM(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PatternInsightORM(Base):
+    __tablename__ = "pattern_insights"
+    __table_args__ = (
+        UniqueConstraint("user_id", "pattern_key", "generated_on", name="pattern_insights_user_key_day"),
+        CheckConstraint("user_feedback in ('accurate', 'not_quite', 'unsure')", name="pattern_insights_feedback_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    generated_on: Mapped[date_] = mapped_column(Date, nullable=False)
+    pattern_key: Mapped[str] = mapped_column(Text, nullable=False)
+    insight_text: Mapped[str] = mapped_column(Text, nullable=False)
+    next_step: Mapped[str] = mapped_column(Text, nullable=False)
+    source_domains: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    evidence_refs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    narrated: Mapped[bool] = mapped_column(default=False)
+    voice_version: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
 

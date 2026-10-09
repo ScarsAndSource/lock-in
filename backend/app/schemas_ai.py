@@ -5,6 +5,7 @@ Stub for slice 8 — the full insights slice is later.
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -25,3 +26,7 @@ class InsightOut(BaseModel):
 class RefreshOut(BaseModel):
     generated: list[InsightOut]
     skipped_reason: str | None = None
+
+
+class InsightFeedbackRequest(BaseModel):
+    feedback: Literal["accurate", "not_quite", "unsure"]

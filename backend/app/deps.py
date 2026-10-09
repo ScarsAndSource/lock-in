@@ -8,8 +8,10 @@ from app.db import get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
+from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
+from app.repositories.retro_repository import SqlAlchemyRetroRepository
 from app.repositories.screen_time_repository import SqlAlchemyScreenTimeRepository
 from app.repositories.sleep_repository import SqlAlchemySleepRepository
 from app.security import FieldEncryptor, get_field_encryptor
@@ -26,8 +28,6 @@ from app.services.sleep_service import SleepService
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
 from app.services.urges_service import UrgesService
-from app.repositories.retro_repository import SqlAlchemyRetroRepository
-
 
 
 def get_clock() -> Clock:
@@ -61,6 +61,10 @@ def get_mission_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchem
 
 def get_account_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyAccountRepository:
     return SqlAlchemyAccountRepository(session)
+
+
+def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyInsightRepository:
+    return SqlAlchemyInsightRepository(session)
 
 
 # ---- services
@@ -112,6 +116,14 @@ def get_stats_service(
     return StatsService(habit_repo, sleep_repo, screen_repo, profiles)
 
 
+def get_insights_service(
+    repo: SqlAlchemyInsightRepository = Depends(get_insight_repository),
+    stats: StatsService = Depends(get_stats_service),
+    clock: Clock = Depends(get_clock),
+) -> InsightsService:
+    return InsightsService(repo, stats, clock)
+
+
 def get_missions_service(
     repo: SqlAlchemyMissionRepository = Depends(get_mission_repository),
     stats: StatsService = Depends(get_stats_service),
@@ -142,10 +154,6 @@ def get_urges_service() -> UrgesService:
     return UrgesService()
 
 
-def get_insights_service(clock: Clock = Depends(get_clock)) -> InsightsService:
-    return InsightsService(clock=clock)
-
-
 def get_retro_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyRetroRepository:
     return SqlAlchemyRetroRepository(session)
 
@@ -162,4 +170,3 @@ def get_retro_service(
     clock: Clock = Depends(get_clock),
 ) -> RetroService:
     return RetroService(repo, stats, study, urges, missions, insights, profiles, llm, clock)
-
