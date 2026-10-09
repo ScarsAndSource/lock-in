@@ -86,7 +86,7 @@ class ApiWorld:
         app.dependency_overrides[get_field_encryptor] = lambda: self.encryptor
         app.dependency_overrides[get_clock] = lambda: self._clock
         app.dependency_overrides[get_llm_client] = lambda: self.llm
-        app.dependency_overrides[get_insights_service] = lambda: InsightsService(self.insight_repo)
+        app.dependency_overrides[get_insights_service] = lambda: InsightsService(self.insight_repo, clock=self._clock)
 
     def client_as(self, user_id) -> TestClient:
         app.dependency_overrides[get_current_user_id] = lambda: user_id

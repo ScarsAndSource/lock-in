@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from app.dates import Clock, utc_now
 from app.domain import PatternInsight
 
 _STALE_AFTER = timedelta(days=7)
@@ -45,8 +46,9 @@ class InsightRepository:
 class InsightsService:
     """Stub: no pattern detection or LLM narration yet. Gate logic is real."""
 
-    def __init__(self, repo: InsightRepository | None = None, *args, **kwargs):
+    def __init__(self, repo: InsightRepository | None = None, clock: Clock = utc_now, *args, **kwargs):
         self._repo = repo or InsightRepository()
+        self._clock = clock
 
     async def list(self, user_id: UUID, limit: int = 20, unrated_only: bool = False) -> list[PatternInsight]:
         if unrated_only:
@@ -54,7 +56,7 @@ class InsightsService:
         return await self._repo.list_all(user_id, limit)
 
     async def refresh(self, user_id: UUID) -> RefreshResult:
-        now = datetime.now(timezone.utc)
+        now = self._clock()
         history = await self._repo.list_all(user_id, 100)
         stale_unrated = [i for i in history if i.user_feedback is None and now - i.generated_at > _STALE_AFTER]
         if len(stale_unrated) >= _MAX_STALE_UNRATED:

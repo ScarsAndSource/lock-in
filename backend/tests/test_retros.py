@@ -15,28 +15,28 @@ GOOD_RETRO = json.dumps({
 
 def seed_retro_week(client, previous_week=False):
     """Week of 12/21–12/27: bad sleep + skipped habit on Wed after a heavy screen day on Tue."""
-    hid = client.post("/habits/", json={
+    hid = client.post("/habits", json={
         "name": "Gym",
         "target_frequency": {"type": "weekdays", "days": [0, 1, 2, 3, 4, 5, 6]},
     }).json()["id"]
     for day in range(21, 28):
         bad = day == 23
-        client.post("/sleep/", json={
+        client.post("/sleep/logs", json={
             "log_date": f"2026-12-{day:02d}",
             "time_to_bed": "01:00:00" if bad else "23:00:00",
             "time_woke": "05:00:00" if bad else "07:00:00",
             "self_rated_quality": 2 if bad else 4,
         })
-        client.post(f"/habits/{hid}/log", json={
+        client.post(f"/habits/{hid}/logs", json={
             "log_date": f"2026-12-{day:02d}",
             "status": "skipped" if bad else "done",
         })
-    client.post("/screen-time/", json={
+    client.post("/screen-time/logs", json={
         "log_date": "2026-12-22", "total_minutes": 300, "source": "manual",
     })
     if previous_week:
         for day in range(14, 21):
-            client.post(f"/habits/{hid}/log", json={
+            client.post(f"/habits/{hid}/logs", json={
                 "log_date": f"2026-12-{day:02d}", "status": "done",
             })
     return hid
@@ -191,8 +191,8 @@ def test_retros_appear_in_account_export(world, user_a):
     world.llm.replies = [GOOD_RETRO]
     client.post("/retros/generate", json={})
 
-    export = client.get("/account/me/export").json()
-    assert len(export["weekly_retros"]) == 1
+    export = client.get("/me/export").json()
+    assert len(export["data"]["weekly_retros"]) == 1
 
 
 def test_job_module_is_importable():

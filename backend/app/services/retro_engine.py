@@ -51,16 +51,17 @@ def week_bounds(today: date, requested_start: date | None) -> tuple[date, date]:
 def count_states(days: list[ChainDay], domain: str) -> dict[str, int]:
     counts = {GOOD: 0, OK: 0, BAD: 0, NONE: 0}
     for d in days:
-        counts[getattr(d, domain)] += 1
+        counts[getattr(d, domain, NONE)] += 1
     return counts
 
 
 def _usable(day: ChainDay, domain: str) -> bool:
-    return getattr(day, domain) != NONE and not getattr(day, f"{domain}_defaulted", False)
+    return getattr(day, domain, NONE) != NONE and not getattr(day, f"{domain}_defaulted", False)
 
 
 def _bad(day: ChainDay | None, domain: str) -> bool:
-    return day is not None and getattr(day, domain) == BAD and _usable(day, domain)
+    return day is not None and getattr(day, domain, NONE) == BAD and _usable(day, domain)
+
 
 
 @dataclass(slots=True)
@@ -108,7 +109,7 @@ def clean_day_list(week_days: list[ChainDay]) -> list[date]:
     """Days where nothing broke: at least two domains had data and none went bad."""
     clean = []
     for d in week_days:
-        known = [getattr(d, dom) for dom in DOMAINS if getattr(d, dom) != NONE]
+        known = [getattr(d, dom, NONE) for dom in DOMAINS if getattr(d, dom, NONE) != NONE]
         if len(known) >= 2 and BAD not in known:
             clean.append(d.day)
     return clean
@@ -138,9 +139,9 @@ def echoes(days: list[ChainDay], week_start: date, week_end: date, keys: list[st
             d, o = by_day[day], by_day.get(day + timedelta(days=lag))
             if o is None or not _usable(d, trigger) or not _usable(o, outcome):
                 continue
-            if getattr(d, trigger) == BAD:
+            if getattr(d, trigger, NONE) == BAD:
                 trigger_days += 1
-                if getattr(o, outcome) == BAD:
+                if getattr(o, outcome, NONE) == BAD:
                     hits.append(day)
         if trigger_days:
             result.append(PatternEcho(key, trigger_days, len(hits), hits))

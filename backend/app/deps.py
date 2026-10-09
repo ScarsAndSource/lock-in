@@ -142,8 +142,8 @@ def get_urges_service() -> UrgesService:
     return UrgesService()
 
 
-def get_insights_service() -> InsightsService:
-    return InsightsService()
+def get_insights_service(clock: Clock = Depends(get_clock)) -> InsightsService:
+    return InsightsService(clock=clock)
 
 
 def get_retro_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyRetroRepository:
