@@ -37,6 +37,7 @@ class ChainDay:
     screen_minutes: int | None
     sleep_defaulted: bool
     screen_time_defaulted: bool
+    habits_defaulted: bool = False
 
 
 def sleep_state(log: SleepLog | None) -> str:
@@ -66,11 +67,14 @@ def screen_state(minutes: int | None, baseline: float | None) -> str:
 
 def habit_day(habits: list[HabitDefinition], by_habit: dict[UUID, dict[date, HabitLog]], day: date):
     total, earned, logged = 0, 0.0, 0
+    all_defaulted = True
     for habit in habits:
         logs = by_habit.get(habit.id, {})
         log = logs.get(day)
         if log is not None:
             logged += 1
+            if not log.is_default:
+                all_defaulted = False
         else:
             if habit.target_frequency.type == "n_per_week":
                 continue
@@ -80,9 +84,10 @@ def habit_day(habits: list[HabitDefinition], by_habit: dict[UUID, dict[date, Hab
         total += 1
         earned += credit(log.status) if log is not None else 0.0
     if logged == 0 or total == 0:
-        return NONE, None
+        return NONE, None, False
     ratio = earned / total
-    return (GOOD if ratio >= 1 else OK if ratio >= 0.5 else BAD), round(ratio, 2)
+    is_defaulted = (logged > 0 and all_defaulted)
+    return (GOOD if ratio >= 1 else OK if ratio >= 0.5 else BAD), round(ratio, 2), is_defaulted
 
 
 def build_chain(
@@ -103,7 +108,7 @@ def build_chain(
     days: list[ChainDay] = []
     d = start
     while d <= end:
-        habits_state, ratio = habit_day(habits, by_habit, d)
+        habits_state, ratio, defaulted = habit_day(habits, by_habit, d)
         sleep_log, screen_log = sleep_by.get(d), screen_by.get(d)
         days.append(ChainDay(
             day=d, habits=habits_state, sleep=sleep_state(sleep_log),
@@ -113,6 +118,7 @@ def build_chain(
             screen_minutes=screen_log.total_minutes if screen_log else None,
             sleep_defaulted=bool(sleep_log and sleep_log.is_default),
             screen_time_defaulted=bool(screen_log and screen_log.is_default),
+            habits_defaulted=defaulted,
         ))
         d += timedelta(days=1)
     return days

@@ -229,6 +229,7 @@ class ChainDayOut(BaseModel):
     screen_minutes: int | None
     sleep_defaulted: bool
     screen_time_defaulted: bool
+    habits_defaulted: bool = False
 
 
 class ChainOut(BaseModel):
