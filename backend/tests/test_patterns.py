@@ -1,66 +1,96 @@
-from datetime import date, datetime, timezone
-from uuid import uuid4
+"""Unit tests for cross-domain pattern detection engine."""
+from datetime import date, timedelta
 
-from app.domain import HabitDefinition, HabitLog, HabitStatus, TargetFrequency
-from app.services.pattern_service import detect_habit_patterns
-
-USER = uuid4()
+from app.services.chain_service import BAD, GOOD, NONE, ChainDay
+from app.services.pattern_service import find_patterns
 
 
-def _habit():
-    return HabitDefinition(
-        id=uuid4(), user_id=USER, name="H", target_frequency=TargetFrequency(type="n_per_week", count=3),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+def _chain_day(d: date, habits="good", sleep="good", screen_time="good",
+               sleep_defaulted=False, screen_time_defaulted=False, habits_defaulted=False):
+    return ChainDay(
+        day=d, habits=habits, sleep=sleep, screen_time=screen_time,
+        habit_ratio=1.0 if habits == "good" else 0.0 if habits == "bad" else None,
+        sleep_minutes=480 if sleep == "good" else 300 if sleep == "bad" else None,
+        screen_minutes=60 if screen_time == "good" else 300 if screen_time == "bad" else None,
+        sleep_defaulted=sleep_defaulted, screen_time_defaulted=screen_time_defaulted,
+        habits_defaulted=habits_defaulted,
     )
 
 
-def _log(habit, d, status=HabitStatus.DONE):
-    return HabitLog(habit_id=habit.id, user_id=USER, log_date=d, status=status)
+def test_patterns_detects_sleep_to_habits_correlation():
+    # 5 days: bad sleep -> bad habits (rate 1.0)
+    # 5 days: good sleep -> good habits (baseline rate 0.0)
+    start = date(2026, 9, 1)
+    days = []
+    for i in range(5):
+        days.append(_chain_day(start + timedelta(days=i), habits=BAD, sleep=BAD))
+    for i in range(5, 10):
+        days.append(_chain_day(start + timedelta(days=i), habits=GOOD, sleep=GOOD))
+
+    patterns = find_patterns(days)
+    assert any(p.key == "sleep->habits" for p in patterns)
+    p = next(p for p in patterns if p.key == "sleep->habits")
+    assert p.trigger_days == 5
+    assert p.hits == 5
+    assert p.rate_after_trigger == 1.0
+    assert p.baseline_rate == 0.0
+    assert len(p.evidence_dates) == 5
 
 
-def test_day_of_week_preference_detected_with_high_confidence():
-    habit = _habit()
-    # Always trains on Monday/Wednesday/Friday for 8 weeks
-    logs = []
-    for w in range(8):
-        base = date(2026, 7, 6) + __import__("datetime").timedelta(weeks=w)  # Jul 6 = Monday
-        logs += [_log(habit, base), _log(habit, base + __import__("datetime").timedelta(2)),
-                 _log(habit, base + __import__("datetime").timedelta(4))]
+def test_patterns_detects_screen_time_to_habits_with_lag_1():
+    # Day N heavy screen -> Day N+1 bad habits
+    start = date(2026, 9, 1)
+    days = []
+    # 4 pairs of (heavy screen day, bad habit next day)
+    for i in range(0, 8, 2):
+        days.append(_chain_day(start + timedelta(days=i), screen_time=BAD, habits=GOOD))
+        days.append(_chain_day(start + timedelta(days=i + 1), screen_time=GOOD, habits=BAD))
+    # 4 baseline days where screen was good and habit stayed good
+    for i in range(8, 12):
+        days.append(_chain_day(start + timedelta(days=i), screen_time=GOOD, habits=GOOD))
 
-    result = detect_habit_patterns(habit, logs, as_of=date(2026, 9, 6))
-    pattern_types = {p.pattern_type for p in result}
-    assert "preferred_days" in pattern_types
-    pref = next(p for p in result if p.pattern_type == "preferred_days")
-    assert set(pref.details["days"]) == {0, 2, 4}
-    assert pref.confidence >= 0.8
-
-
-def test_weekend_warrior_detected():
-    habit = _habit()
-    import datetime as dt
-    logs = []
-    for w in range(6):
-        base = date(2026, 7, 6) + dt.timedelta(weeks=w)
-        sat = base + dt.timedelta(5)
-        sun = base + dt.timedelta(6)
-        logs += [_log(habit, sat), _log(habit, sun)]
-
-    result = detect_habit_patterns(habit, logs, as_of=date(2026, 8, 22))
-    pattern_types = {p.pattern_type for p in result}
-    assert "weekend_warrior" in pattern_types
+    patterns = find_patterns(days)
+    assert any(p.key == "screen_time->habits" for p in patterns)
+    p = next(p for p in patterns if p.key == "screen_time->habits")
+    assert p.lag_days == 1
+    assert p.hits >= 3
 
 
-def test_low_data_returns_no_patterns():
-    habit = _habit()
-    logs = [_log(habit, date(2026, 9, 1))]
-    result = detect_habit_patterns(habit, logs, as_of=date(2026, 9, 7))
-    assert result == []
+def test_patterns_ignores_autofilled_default_days():
+    # 4 days of bad sleep -> bad habits, but sleep was an auto-filled default
+    start = date(2026, 9, 1)
+    days = []
+    for i in range(4):
+        days.append(_chain_day(start + timedelta(days=i), habits=BAD, sleep=BAD, sleep_defaulted=True))
+    for i in range(4, 10):
+        days.append(_chain_day(start + timedelta(days=i), habits=GOOD, sleep=GOOD))
+
+    patterns = find_patterns(days)
+    # Defaulted days must not be usable as trigger evidence
+    assert not any(p.key == "sleep->habits" for p in patterns)
 
 
-def test_all_same_day_is_preferred_day_and_not_weekend_warrior():
-    habit = _habit()
-    import datetime as dt
-    logs = [_log(habit, date(2026, 7, 6) + dt.timedelta(weeks=w)) for w in range(8)]  # all Mondays
-    result = detect_habit_patterns(habit, logs, as_of=date(2026, 9, 6))
-    assert any(p.pattern_type == "preferred_days" for p in result)
-    assert not any(p.pattern_type == "weekend_warrior" for p in result)
+def test_patterns_insufficient_trigger_days_returns_empty():
+    start = date(2026, 9, 1)
+    days = [
+        _chain_day(start, habits=BAD, sleep=BAD),
+        _chain_day(start + timedelta(days=1), habits=BAD, sleep=BAD),  # only 2 trigger days (< 3)
+        _chain_day(start + timedelta(days=2), habits=GOOD, sleep=GOOD),
+        _chain_day(start + timedelta(days=3), habits=GOOD, sleep=GOOD),
+        _chain_day(start + timedelta(days=4), habits=GOOD, sleep=GOOD),
+    ]
+    patterns = find_patterns(days)
+    assert patterns == []
+
+
+def test_patterns_small_gap_over_baseline_is_not_reported():
+    # If habits slip equally often without bad sleep, no causal pattern is reported
+    start = date(2026, 9, 1)
+    days = []
+    for i in range(4):
+        days.append(_chain_day(start + timedelta(days=i), habits=BAD, sleep=BAD))
+    for i in range(4, 8):
+        days.append(_chain_day(start + timedelta(days=i), habits=BAD, sleep=GOOD))  # also bad habits!
+
+    patterns = find_patterns(days)
+    assert not any(p.key == "sleep->habits" for p in patterns)

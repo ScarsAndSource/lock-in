@@ -1,75 +1,85 @@
+"""Tests for the /missions family of endpoints."""
 import pytest
+from uuid import uuid4
 
-ACTIVE_BODY = {
-    "name": "Get fit", "target_metric": "run 5k", "target_date": "2026-12-31",
-    "habit_ids": [],
+MISSION_PAYLOAD = {
+    "title": "Get fit",
+    "duration_days": 30,
+    "start_date": "2026-12-31",
 }
 
 
 def test_start_mission_returns_201_with_id(world, user_a):
     client = world.client_as(user_a)
-    r = client.post("/missions/", json=ACTIVE_BODY)
+    r = client.post("/missions", json=MISSION_PAYLOAD)
     assert r.status_code == 201
     data = r.json()
     assert data["status"] == "active"
+    assert data["title"] == "Get fit"
+    assert data["start_date"] == "2026-12-31"
+    assert "end_date" in data
     assert "id" in data
 
 
 def test_get_missions_returns_the_mission(world, user_a):
     client = world.client_as(user_a)
-    client.post("/missions/", json=ACTIVE_BODY)
-    r = client.get("/missions/")
+    client.post("/missions", json=MISSION_PAYLOAD)
+    r = client.get("/missions")
     assert r.status_code == 200
-    assert len(r.json()) == 1
+    missions = r.json()
+    assert len(missions) == 1
+    assert missions[0]["title"] == "Get fit"
+
+
+def test_get_active_mission_returns_detail(world, user_a):
+    client = world.client_as(user_a)
+    client.post("/missions", json=MISSION_PAYLOAD)
+    r = client.get("/missions/active")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["mission"]["title"] == "Get fit"
+    assert "progress" in data
+    assert "habits" in data
 
 
 def test_cannot_start_two_active_missions(world, user_a):
     client = world.client_as(user_a)
-    client.post("/missions/", json=ACTIVE_BODY)
-    r = client.post("/missions/", json=ACTIVE_BODY)
+    client.post("/missions", json=MISSION_PAYLOAD)
+    r = client.post("/missions", json=MISSION_PAYLOAD)
     assert r.status_code == 409
 
 
 def test_complete_mission(world, user_a):
     client = world.client_as(user_a)
-    mission_id = client.post("/missions/", json=ACTIVE_BODY).json()["id"]
-    r = client.post(f"/missions/{mission_id}/complete", json={"outcome_notes": "nailed it"})
+    mission_id = client.post("/missions", json=MISSION_PAYLOAD).json()["id"]
+    r = client.post(f"/missions/{mission_id}/end", json={"completed": True})
     assert r.status_code == 200
     assert r.json()["status"] == "completed"
 
 
-def test_abandon_mission(world, user_a):
+def test_end_mission_early(world, user_a):
     client = world.client_as(user_a)
-    mission_id = client.post("/missions/", json=ACTIVE_BODY).json()["id"]
-    r = client.post(f"/missions/{mission_id}/abandon", json={"reason": "too hard"})
+    mission_id = client.post("/missions", json=MISSION_PAYLOAD).json()["id"]
+    r = client.post(f"/missions/{mission_id}/end", json={"completed": False})
     assert r.status_code == 200
-    assert r.json()["status"] == "abandoned"
+    assert r.json()["status"] == "ended_early"
 
 
 def test_users_cannot_see_each_others_missions(world, user_a, user_b):
-    world.client_as(user_a).post("/missions/", json=ACTIVE_BODY)
-    r = world.client_as(user_b).get("/missions/")
+    world.client_as(user_a).post("/missions", json=MISSION_PAYLOAD)
+    r = world.client_as(user_b).get("/missions")
     assert r.json() == []
 
 
-def test_mission_history_returns_non_active_missions(world, user_a):
+def test_cannot_end_an_already_ended_mission(world, user_a):
     client = world.client_as(user_a)
-    mid = client.post("/missions/", json=ACTIVE_BODY).json()["id"]
-    client.post(f"/missions/{mid}/complete", json={"outcome_notes": ""})
-    r = client.get("/missions/history")
-    assert r.status_code == 200
-    assert len(r.json()) == 1
-
-
-def test_cannot_complete_a_completed_mission(world, user_a):
-    client = world.client_as(user_a)
-    mid = client.post("/missions/", json=ACTIVE_BODY).json()["id"]
-    client.post(f"/missions/{mid}/complete", json={"outcome_notes": ""})
-    r = client.post(f"/missions/{mid}/complete", json={"outcome_notes": ""})
+    mid = client.post("/missions", json=MISSION_PAYLOAD).json()["id"]
+    client.post(f"/missions/{mid}/end", json={"completed": True})
+    r = client.post(f"/missions/{mid}/end", json={"completed": True})
     assert r.status_code == 409
 
 
-def test_mission_not_found_returns_404_not_403(world, user_a):
+def test_mission_not_found_returns_404(world, user_a):
     client = world.client_as(user_a)
-    r = client.post("/missions/00000000-0000-0000-0000-000000000000/complete", json={"outcome_notes": ""})
+    r = client.post(f"/missions/{uuid4()}/end", json={"completed": True})
     assert r.status_code == 404
