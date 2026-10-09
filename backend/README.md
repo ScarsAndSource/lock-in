@@ -17,46 +17,42 @@
 ## Endpoints (current)
 
 ```
-POST   /habits/                      create habit
-GET    /habits/                      list habits
-PATCH  /habits/{id}                  update habit
-DELETE /habits/{id}                  archive habit
-POST   /habits/{id}/log              log habit status for a date
-GET    /habits/{id}/logs             list habit logs
+POST   /habits                       create habit
+GET    /habits                       list habits (?include_archived=bool)
+PATCH  /habits/{id}                  update habit (rename / archive / unarchive)
+POST   /habits/{id}/logs             log habit status for a date (upsert)
 
-POST   /checkins/v2                  upsert daily check-in (bulk form)
-GET    /checkins/v2/{date}           get check-in for a date
-GET    /checkins/v2/defaults         compute opt-out defaults for today
+GET    /checkins/{date}/defaults     compute opt-out defaults for date
+POST   /checkins/{date}/confirm      confirm check-in (habits + sleep + screen + journal)
+GET    /checkins/{date}/journal      get decrypted journal for date
 
-GET    /sleep/                       list sleep logs
-POST   /sleep/                       create/upsert sleep log
-DELETE /sleep/{date}                 delete sleep log
+POST   /sleep/logs                   create/upsert sleep log
+GET    /sleep/logs/{date}            get sleep log for a date
+GET    /sleep/logs                   list sleep logs (?start_date=&end_date=)
 
-GET    /screen-time/                 list screen-time logs
-POST   /screen-time/                 create/upsert screen-time log
-DELETE /screen-time/{date}           delete screen-time log
+POST   /screen-time/logs             create/upsert screen-time log
+GET    /screen-time/logs/{date}      get screen-time log for a date
+GET    /screen-time/logs             list screen-time logs (?start_date=&end_date=)
 
-GET    /stats/                       overall stats summary
-GET    /stats/habits/{id}            consistency score for one habit
-GET    /stats/habits/{id}/patterns   detected patterns for one habit
+GET    /stats/consistency            rolling consistency score (?end_date=&window_days=)
+GET    /stats/chain                  multi-domain chain strip (?end_date=&days=)
+GET    /stats/patterns               detected cross-domain patterns (?end_date=&days=)
 
-POST   /missions/                    start a mission
-GET    /missions/                    active mission
-GET    /missions/history             completed / abandoned missions
-POST   /missions/{id}/complete       complete a mission
-POST   /missions/{id}/abandon        abandon a mission
+POST   /missions                     create a mission
+GET    /missions                     list missions
+GET    /missions/active              active mission progress and checkpoint detail
+POST   /missions/{id}/end            end mission (completed=true|false)
 
-GET    /profile/                     get profile
-PUT    /profile/                     upsert profile
+GET    /me                           get profile (timezone, tone_preference, today)
+PATCH  /me                           update timezone
+GET    /me/export                    export all user data as JSON (journals decrypted)
+DELETE /me                           irreversibly delete account and all data
 
 GET    /retros                       list past retros (up to 52)
 GET    /retros/latest                latest retro with pending insight ratings
 GET    /retros/{week_start}          get retro for a specific Monday
 POST   /retros/generate              generate (or retrieve) this week's retro
 POST   /retros/{week_start}/complete mark retro done → triggers insight refresh
-
-GET    /account/me/export            export all user data as JSON
-DELETE /account/me                   delete account and all data
 ```
 
 ## Slice 8 — weekly retro architecture
@@ -75,7 +71,8 @@ at four upstream signals:
 
 If any of those were bad, the slip gets a cause. If none of them were, it goes into
 `unexplained_slips` — the retro never invents a cause. Auto-filled (defaulted)
-sleep/screen rows are explicitly excluded from being counted as evidence.
+habit, sleep, and screen rows are explicitly excluded from being counted as evidence,
+so guesses never count as history, feed into defaults, or fabricate consistency.
 
 The top 3 chains (ranked by number of upstream signals) are stored in `summary.chains`
 as structured JSON with ISO dates and weekday names. That's what both the fallback
