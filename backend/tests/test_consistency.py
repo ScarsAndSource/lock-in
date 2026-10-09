@@ -60,3 +60,17 @@ def test_overall_is_the_mean_of_habit_percentages():
     logs = [_log(full, date(2026, 9, d)) for d in (21, 22, 23)]
     items = [compute_habit_consistency(h, logs, date(2026, 9, 27), 7) for h in (full, empty)]
     assert overall_consistency(items) == 50.0
+
+
+def test_auto_filled_default_logs_do_not_count_toward_consistency():
+    habit = _habit(TargetFrequency(type="weekdays", days=(0, 2, 4)))
+    # Logs are present but flagged as auto-filled guesses (is_default=True)
+    logs = [
+        HabitLog(habit_id=habit.id, user_id=USER, log_date=date(2026, 9, 21), status=HabitStatus.DONE, is_default=True),
+        HabitLog(habit_id=habit.id, user_id=USER, log_date=date(2026, 9, 23), status=HabitStatus.DONE, is_default=True),
+    ]
+    r = compute_habit_consistency(habit, logs, end_date=date(2026, 9, 25), window_days=7)
+    # Defaulted logs earn 0 credit; earned should be 0.0, consistency_pct 0.0
+    assert r.earned == 0.0
+    assert r.consistency_pct == 0.0
+    assert r.logged_days == 0

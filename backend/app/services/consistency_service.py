@@ -56,7 +56,11 @@ def compute_habit_consistency(
     if window_days < 1:
         raise ValueError("window_days must be >= 1")
     start = end_date - timedelta(days=window_days - 1)
-    by_date = {l.log_date: l for l in logs if l.habit_id == habit.id and start <= l.log_date <= end_date}
+    by_date = {
+        l.log_date: l
+        for l in logs
+        if l.habit_id == habit.id and not l.is_default and start <= l.log_date <= end_date
+    }
     if habit.target_frequency.type == "weekdays":
         return _weekdays(habit, by_date, start, end_date, window_days)
     return _n_per_week(habit, by_date, start, end_date, window_days)
