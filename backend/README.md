@@ -156,7 +156,7 @@ at different times. Generation is idempotent — one retro per user per week.
 python -m pytest -v
 ```
 
-Tests use fully in-memory fakes — no database or network required.
+Tests use fully in-memory fakes — no database or network required. All 114 tests passing across unit, service, security, and API integration suites.
 
 ## What has NOT been verified against a live database
 

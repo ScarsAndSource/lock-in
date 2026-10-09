@@ -9,31 +9,33 @@ never resets to zero on a miss. Full reasoning and data model: [SPEC.md](./SPEC.
 
 | Slice | Status |
 |---|---|
-| 1. Habit domain + unified daily check-in (opt-out defaults) | **Done** — `backend/`, 33 tests passing |
+| 1. Habit domain + unified daily check-in (opt-out defaults) | **Done** — `backend/` |
 | 2. Frontend for slice 1 (PWA check-in screen) | Not started |
-| 3. Sleep + screen-time domains | Not started |
-| 4. Study domain (`subjects` table) | Not started |
-| 5. Urge domain (encrypted fields, quick-capture) | Not started |
-| 6. Implementation intentions | Not started |
-| 7. Groq pattern insights + check-in chat (crisis fallback required) | Not started |
-| 8. Weekly retrospective + insight feedback loop | Not started |
-| 9. Chain visualization | Not started |
-| 10. Phase 2: Chrome extension for real screen time | Not started, post-v1 |
+| 3. Sleep + screen-time domains | **Done** — `backend/` |
+| 3b. Missions (goal-scoped sprints) | **Done** — `backend/` |
+| 3c. Schedule service, consistency scoring, pattern detection, profile, account export/delete, rate limiting | **Done** — `backend/` |
+| 4. Study domain (`subjects` table) | Next |
+| 5. Urge domain (encrypted fields, quick-capture) | Next |
+| 6. Implementation intentions | Next |
+| 7. Groq pattern insights + check-in chat (crisis fallback required) | Next |
+| 8. Weekly retrospective + insight feedback loop | **Done** — `backend/` |
+| 9. Chain visualization | Next |
+| 10. Phase 2: Chrome extension for real screen time | Post-v1 |
 
 ## Structure
 
 ```
 lockin/
   SPEC.md              -- source of truth, read this first
-  backend/             -- FastAPI app (slice 1 complete)
+  backend/             -- FastAPI app (backend slices 1, 3, 3b, 3c, 8 complete)
     app/
       domain.py         -- plain dataclasses, no DB dependency
-      services/         -- business logic (defaults engine lives here)
+      services/         -- business logic (defaults engine, consistency, chains, patterns, retros)
       repositories/      -- DB access, isolated behind Protocol interfaces
       routers/           -- HTTP endpoints
       security.py         -- JWT verification + field-level encryption
     migrations/          -- raw SQL, run manually against Supabase
-    tests/               -- 33 passing tests, see backend/README.md
+    tests/               -- 114 passing tests, see backend/README.md
   frontend/            -- not created yet (slice 2)
 ```
 
