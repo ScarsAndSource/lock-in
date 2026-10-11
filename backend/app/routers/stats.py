@@ -39,7 +39,8 @@ async def get_chain(
     end, chain = await service.chain(user_id, end_date, days)
     return ChainOut(end_date=end, days=[
         ChainDayOut(
-            day=d.day, habits=d.habits, sleep=d.sleep, screen_time=d.screen_time, habit_ratio=d.habit_ratio,
+            day=d.day, habits=d.habits, sleep=d.sleep, screen_time=d.screen_time,
+            study=d.study, urges=d.urges, habit_ratio=d.habit_ratio,
             sleep_minutes=d.sleep_minutes, screen_minutes=d.screen_minutes,
             sleep_defaulted=d.sleep_defaulted, screen_time_defaulted=d.screen_time_defaulted,
             habits_defaulted=d.habits_defaulted,

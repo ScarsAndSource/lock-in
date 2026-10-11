@@ -249,6 +249,8 @@ class ChainDayOut(BaseModel):
     habits: str
     sleep: str
     screen_time: str
+    study: str = "none"
+    urges: str = "none"
     habit_ratio: float | None
     sleep_minutes: int | None
     screen_minutes: int | None
