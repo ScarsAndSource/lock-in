@@ -258,4 +258,22 @@ class IntentionORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class LlmUsageORM(Base):
+    __tablename__ = "llm_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "usage_date", "feature", name="llm_usage_user_day_feature"),
+        CheckConstraint("feature in ('chat', 'retro', 'insight')", name="llm_usage_feature_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    usage_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    feature: Mapped[str] = mapped_column(Text, nullable=False)
+    calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+
 

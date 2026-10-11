@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain import HabitStatus, MissionStatus, ScreenTimeSource
+from app.schemas_chat import SupportOut
 
 
 # ---------------------------------------------------------------- habits
@@ -215,6 +216,8 @@ class CheckinConfirmOut(BaseModel):
     entries: list[CheckinEntryOut]
     sleep: SleepLogOut | None
     screen_time: ScreenTimeLogOut | None
+    support: SupportOut | None = None  # present only when the journal/notes tripped the crisis screen
+
 
 
 class JournalOut(BaseModel):

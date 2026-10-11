@@ -26,3 +26,12 @@ class RateLimitedError(LockinError):
     def __init__(self, retry_after: int):
         super().__init__("Too many requests.")
         self.retry_after = retry_after
+
+
+class DailyLimitError(LockinError):
+    """The user's daily AI-call cap is used up. Resets at 00:00 UTC."""
+
+    def __init__(self, retry_after: int):
+        super().__init__("Daily AI limit reached.")
+        self.retry_after = retry_after
+

@@ -1,0 +1,177 @@
+"""
+Check-in chat. Stateless: the client sends the last few turns each time; nothing is stored.
+Order of business (the order IS the safety design):
+1. crisis screen on the message AND the user turns in the supplied history
+   -> fixed support reply, no model, no cap, no rate limit
+2. build the evidence pack from the user's logs; no logged data -> say so, no model call
+3. model call: facts + the question isolated as DATA (<user_question>, angle brackets stripped)
+4. validate (cited days must exist in the facts, no invented numbers, tone gate)
+5. anything that fails or errors -> deterministic digest of the facts (mode="fallback")
+Only the daily cap is a hard stop (DailyLimitError -> 429).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import timedelta
+from uuid import UUID
+
+from app.dates import Clock, utc_now
+from app.exceptions import DailyLimitError, NotFoundError, ValidationError
+from app.safety import SUPPORT_MESSAGE, conversation_has_crisis, support_payload
+from app.services.chat_facts import build_chat_facts, fact_days, fallback_digest
+from app.services.goals_service import GoalsService
+from app.services.llm import LLMBudgetExceeded, LLMClient, LLMError, seconds_until_reset
+from app.services.missions_service import MissionsService
+from app.services.narration import narrate_structured, sanitize_user_text
+from app.services.profile_service import ProfileService
+from app.services.stats_service import StatsService
+from app.services.study_service import StudyService
+from app.services.urges_service import UrgesService
+from app.voice_config import chat_system_prompt
+
+logger = logging.getLogger("lockin.chat")
+
+MAX_HISTORY = 6
+MAX_TEXT = 1000
+NO_DATA_REPLY = (
+    "Nothing is logged in the last 14 days, so there's nothing to analyze yet. "
+    "Do today's check-in and ask again."
+)
+
+
+@dataclass(slots=True)
+class ChatReply:
+    mode: str  # answer | support | no_data | fallback
+    reply: str
+    next_step: str | None = None
+    cited_days: list[str] = field(default_factory=list)
+    narrated: bool = False
+    model: str | None = None
+    support: dict | None = None
+
+
+class ChatService:
+    def __init__(
+        self,
+        stats: StatsService,
+        study: StudyService,
+        urges: UrgesService,
+        goals: GoalsService,
+        missions: MissionsService,
+        profiles: ProfileService,
+        llm: LLMClient,
+        clock: Clock = utc_now,
+    ):
+        self._stats, self._study, self._urges, self._goals = stats, study, urges, goals
+        self._missions, self._profiles, self._llm, self._clock = missions, profiles, llm, clock
+
+    async def reply(
+        self,
+        user_id: UUID,
+        message: str,
+        history: list[tuple[str, str]],
+        before_model: Callable[[], None] | None = None,
+    ) -> ChatReply:
+        history = history[-MAX_HISTORY:]
+
+        # 1. crisis first, on the RAW text (max recall), before anything else happens.
+        user_turns = [content for role, content in history if role == "user"]
+        if conversation_has_crisis(message, *user_turns):
+            logger.info("chat: support path served")
+            tz = (await self._profiles.get(user_id)).timezone
+            return ChatReply(mode="support", reply=SUPPORT_MESSAGE, support=support_payload(tz))
+
+        question = sanitize_user_text(message, MAX_TEXT, single_line=True)
+        if not question:
+            raise ValidationError("Message can't be blank.")
+
+        # 2. evidence
+        facts = await self._gather(user_id)
+        if facts["logged_days"] == 0:
+            return ChatReply(mode="no_data", reply=NO_DATA_REPLY)
+
+        facts_json = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+
+        # 3. model call, user text isolated as data
+        messages: list[dict] = [
+            {"role": "system", "content": chat_system_prompt()},
+            {"role": "user", "content": f"<facts>\n{facts_json}\n</facts>"},
+        ]
+        for role, content in history:
+            text = sanitize_user_text(content, MAX_TEXT, single_line=True)
+            if text:
+                messages.append({
+                    "role": role,
+                    "content": f"<user_question>{text}</user_question>" if role == "user" else text,
+                })
+        messages.append({"role": "user", "content": f"<user_question>{question}</user_question>"})
+
+        if before_model is not None:
+            before_model()
+
+        # 4-5. validate or fall back
+        try:
+            narration, _ = await narrate_structured(
+                self._llm,
+                messages,
+                facts_json=facts_json,
+                require_dates=True,
+                max_observation=600,
+                max_tokens=400,
+                temperature=0.3,
+                text_key="answer",
+                check_numbers=True,
+                allowed_days=fact_days(facts),
+            )
+        except LLMBudgetExceeded as exc:
+            raise DailyLimitError(seconds_until_reset(self._clock())) from exc
+        except LLMError:
+            narration = None
+
+        if narration is None:
+            return ChatReply(mode="fallback", reply=fallback_digest(facts))
+
+        return ChatReply(
+            mode="answer",
+            reply=narration.observation,
+            next_step=narration.next_step,
+            cited_days=narration.cited_days,
+            narrated=True,
+            model=self._llm.model,
+        )
+
+    async def _gather(self, user_id: UUID) -> dict:
+        end, days = await self._stats.chain(user_id, None, 14)
+        _, habit_items, _ = await self._stats.consistency(user_id, end, 30)
+        _, patterns = await self._stats.patterns(user_id, end, 30)
+        start = end - timedelta(days=13)
+        study = await self._study.summary(user_id, start, end)
+        by_subject = await self._study.breakdown(user_id, start, end)
+        _, urge, _ = await self._urges.summary(user_id, end, 14)
+        goals = await self._goals.progress(user_id)
+        try:
+            mission, progress, pct, _ = await self._missions.get_active_detail(user_id)
+            mission_facts = {
+                "title": sanitize_user_text(mission.title, 60, single_line=True),
+                "day_number": progress.day_number,
+                "days_total": progress.days_total,
+                "phase": progress.phase,
+                "consistency_pct": pct,
+            }
+        except NotFoundError:
+            mission_facts = None
+
+        return build_chat_facts(
+            end=end,
+            days=days,
+            habit_items=habit_items,
+            patterns=patterns,
+            study=study,
+            by_subject=by_subject,
+            urge=urge,
+            goals=goals,
+            mission=mission_facts,
+        )

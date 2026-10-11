@@ -12,11 +12,14 @@
 | 5 | Urge / relapse logging (encrypted free-text) | ✅ Done |
 | 6 | Goals & Implementation intentions (If-then plans) | ✅ Done |
 | 8 | Weekly retrospective — chain tracing, LLM narration, feedback loop, daily cron job | ✅ Done |
-| 7 | Groq insight layer (full wiring) | 🔜 Next |
+| 7 | Groq LLM layer, crisis safety net, daily call cap, voice v2, stateless chat | ✅ Done |
 
 ## Endpoints (current)
 
 ```
+POST   /chat                         stateless chat over logs (?history=[])
+GET    /support/resources            public crisis helplines (?region=)
+
 POST   /habits                       create habit
 GET    /habits                       list habits (?include_archived=bool)
 PATCH  /habits/{id}                  update habit (rename / archive / unarchive / schedule)

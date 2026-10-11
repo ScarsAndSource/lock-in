@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     rate_limit_export_per_hour: int = Field(default=5, ge=1)
     rate_limit_insights_refresh_per_hour: int = Field(default=10, ge=1)
 
+    # --- LLM (Groq) -------------------------------------------------------
+    groq_api_key: str = ""  # empty => every narration falls back to deterministic text
+    groq_model: str = "llama-3.3-70b-versatile"  # check Groq's current model list before deploy
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_timeout_seconds: float = Field(default=20.0, gt=0, le=60)
+    llm_daily_call_cap: int = Field(default=80, ge=1)  # per user per UTC day, all features, retries included
+    rate_limit_chat_per_minute: int = Field(default=6, ge=1)
+    rate_limit_chat_per_hour: int = Field(default=60, ge=1)
+
+
     @model_validator(mode="after")
     def _check_auth_config(self) -> "Settings":
         if self.auth_mode == "hs256" and not self.supabase_jwt_secret:

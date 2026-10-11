@@ -1,15 +1,17 @@
 """
-Insights: deterministic patterns (pattern_service) -> stored insights -> user rates them.
+Insights: deterministic patterns (pattern_service) -> optional Groq narration -> stored -> user rates them.
 
 refresh() order of business:
-  1. soft gate: 3+ insights older than 7 days still unrated -> 'rate_previous_first'
-  2. find proven patterns over the last 30 days (math, with evidence dates)
-  3. skip any pattern already issued in the last 7 days
-  4. store up to 3 new ones (narrated=False; Groq narration plugs in at slice 7)
-The model never invents a pattern: it can only narrate what step 2 found.
+1. soft gate: 3+ insights older than 7 days still unrated -> 'rate_previous_first'
+2. find proven patterns over the last 30 days (math, with evidence dates)
+3. skip any pattern already issued in the last 7 days
+4. store up to 3 new ones. Each is narrated by the model IF it validates (cited days must be this
+   pattern's evidence dates, no invented numbers, tone gate); otherwise the deterministic statement
+   is stored (narrated=False). The model never invents a pattern: it can only narrate what step 2 found.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Protocol
@@ -18,15 +20,18 @@ from uuid import UUID, uuid4
 from app.dates import Clock, utc_now
 from app.domain import PatternInsight
 from app.exceptions import NotFoundError, ValidationError
-from app.services.narration import fallback_next_step
+from app.services.llm import LLMClient, LLMError
+from app.services.narration import NarrationResult, fallback_next_step, narrate_structured
 from app.services.stats_service import StatsService
-from app.voice_config import VOICE_VERSION
+from app.voice_config import VOICE_VERSION, insight_system_prompt
 
 _STALE_AFTER = timedelta(days=7)
 _MAX_STALE_UNRATED = 3
 _REGEN_AFTER_DAYS = 7
 _MAX_NEW_PER_REFRESH = 3
 _PATTERN_WINDOW_DAYS = 30
+_WD = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
 VALID_FEEDBACK = ("accurate", "not_quite", "unsure")
 
 
@@ -44,7 +49,7 @@ class InsightStore(Protocol):
 
 
 class InsightRepository:
-    """In-memory store -- TESTS ONLY. Production wiring (deps.py) passes SqlAlchemyInsightRepository."""
+    """In-memory store -- TESTS ONLY. Production wiring (deps.py, the job) passes SqlAlchemyInsightRepository."""
 
     def __init__(self):
         self._insights: dict[UUID, PatternInsight] = {}
@@ -73,10 +78,17 @@ class InsightRepository:
 
 
 class InsightsService:
-    def __init__(self, repo: InsightStore | None = None, stats: StatsService | None = None, clock: Clock = utc_now):
+    def __init__(
+        self,
+        repo: InsightStore | None = None,
+        stats: StatsService | None = None,
+        clock: Clock = utc_now,
+        llm: LLMClient | None = None,
+    ):
         self._repo = repo or InsightRepository()
         self._stats = stats
         self._clock = clock
+        self._llm = llm
 
     async def list(self, user_id: UUID, limit: int = 20, unrated_only: bool = False) -> list[PatternInsight]:
         if unrated_only:
@@ -89,34 +101,91 @@ class InsightsService:
         stale_unrated = [i for i in history if i.user_feedback is None and now - i.generated_at > _STALE_AFTER]
         if len(stale_unrated) >= _MAX_STALE_UNRATED:
             return RefreshResult([], "rate_previous_first")
+
         if self._stats is None:
             return RefreshResult([], "no_patterns")
-
         today, patterns = await self._stats.patterns(user_id, None, _PATTERN_WINDOW_DAYS)
         if not patterns:
             return RefreshResult([], "no_patterns")
 
         recent_keys = {i.pattern_key for i in history if (today - i.generated_on).days < _REGEN_AFTER_DAYS}
         created: list[PatternInsight] = []
+        llm_ok = self._llm is not None
+
         for p in patterns:
             if len(created) >= _MAX_NEW_PER_REFRESH:
                 break
             if p.key in recent_keys:
                 continue
+
+            text, step, narrated, cited = p.statement[:800], fallback_next_step(p.key), False, []
+            if llm_ok:
+                result, llm_ok = await self._narrate(p)
+                if result is not None:
+                    text, step, narrated, cited = result.observation, result.next_step, True, result.cited_days
+
             saved = await self._repo.add(PatternInsight(
-                id=uuid4(), user_id=user_id, generated_at=now, generated_on=today, pattern_key=p.key,
-                insight_text=p.statement[:800], next_step=fallback_next_step(p.key),
+                id=uuid4(),
+                user_id=user_id,
+                generated_at=now,
+                generated_on=today,
+                pattern_key=p.key,
+                insight_text=text,
+                next_step=step,
                 source_domains=p.key.split("->"),
                 evidence_refs={
-                    "dates": [d.isoformat() for d in p.evidence_dates], "trigger_days": p.trigger_days,
-                    "hits": p.hits, "rate_after_trigger": p.rate_after_trigger,
-                    "baseline_rate": p.baseline_rate, "lag_days": p.lag_days,
+                    "dates": [d.isoformat() for d in p.evidence_dates],
+                    "trigger_days": p.trigger_days,
+                    "hits": p.hits,
+                    "rate_after_trigger": p.rate_after_trigger,
+                    "baseline_rate": p.baseline_rate,
+                    "lag_days": p.lag_days,
+                    "cited_days": cited,
                 },
-                narrated=False, voice_version=VOICE_VERSION, model=None,
+                narrated=narrated,
+                voice_version=VOICE_VERSION,
+                model=self._llm.model if narrated else None,
             ))
             if saved is not None:
                 created.append(saved)
+
         return RefreshResult(created, None if created else "no_new_patterns")
+
+    async def _narrate(self, p) -> tuple[NarrationResult | None, bool]:
+        """(result or None, keep_trying). An LLM outage/over-budget stops narration for the rest of this refresh."""
+        facts = {
+            "pattern_key": p.key,
+            "statement": p.statement,
+            "numbers": {
+                "trigger_days": p.trigger_days,
+                "hits": p.hits,
+                "rate_after_trigger": round(p.rate_after_trigger, 3),
+                "baseline_days": p.baseline_days,
+                "baseline_rate": round(p.baseline_rate, 3),
+                "lag_days": p.lag_days,
+            },
+            "evidence": [{"date": d.isoformat(), "weekday": _WD[d.weekday()]} for d in p.evidence_dates[:8]],
+        }
+        facts_json = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+        messages = [
+            {"role": "system", "content": insight_system_prompt()},
+            {"role": "user", "content": f"<facts>\n{facts_json}\n</facts>"},
+        ]
+        try:
+            result, _ = await narrate_structured(
+                self._llm,
+                messages,
+                facts_json=facts_json,
+                require_dates=True,
+                max_observation=350,
+                max_tokens=300,
+                temperature=0.3,
+                check_numbers=True,
+                allowed_days={e["date"] for e in facts["evidence"]},
+            )
+        except LLMError:
+            return None, False
+        return result, True
 
     async def set_feedback(self, user_id: UUID, insight_id: UUID, feedback: str) -> PatternInsight:
         if feedback not in VALID_FEEDBACK:

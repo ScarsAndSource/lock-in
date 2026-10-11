@@ -26,6 +26,7 @@ from app.db import AsyncSessionLocal, apply_rls_context
 from app.models import DailyCheckinORM, HabitLogORM, ScreenTimeLogORM, SleepLogORM
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
+from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
@@ -35,7 +36,7 @@ from app.repositories.study_repository import SqlAlchemyStudySessionRepository, 
 from app.repositories.urge_repository import SqlAlchemyUrgeRepository
 from app.security import FieldEncryptor
 from app.services.insights_service import InsightsService
-from app.services.llm import GroqClient, LLMClient
+from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
 from app.services.profile_service import ProfileService
 from app.services.retro_service import RetroService
@@ -69,34 +70,58 @@ async def active_user_ids(
 def build_retro_service(session, llm: LLMClient, settings: Settings, clock: Clock = utc_now) -> RetroService:
     profiles = ProfileService(SqlAlchemyProfileRepository(session), clock)
     study_repo = SqlAlchemyStudySessionRepository(session)
-    subject_repo = SqlAlchemySubjectRepository(session)
     urge_repo = SqlAlchemyUrgeRepository(session)
     stats = StatsService(
-        SqlAlchemyHabitRepository(session), SqlAlchemySleepRepository(session),
-        SqlAlchemyScreenTimeRepository(session), profiles,
-        study_repo=study_repo, urge_repo=urge_repo,
+        SqlAlchemyHabitRepository(session),
+        SqlAlchemySleepRepository(session),
+        SqlAlchemyScreenTimeRepository(session),
+        profiles,
+        study_repo,
+        urge_repo,
     )
-    study = StudyService(study_repo, subject_repo, clock)
-    urges = UrgesService(urge_repo, FieldEncryptor(settings.field_encryption_key), clock)
+    study = StudyService(SqlAlchemySubjectRepository(session), study_repo, clock)
+    encryptor = FieldEncryptor(settings.field_encryption_key, settings.old_encryption_keys)
+    urges = UrgesService(urge_repo, encryptor, profiles, clock)
     missions = MissionsService(SqlAlchemyMissionRepository(session), stats, profiles, clock)
-    insights = InsightsService(SqlAlchemyInsightRepository(session), stats, clock)
+    insights = InsightsService(SqlAlchemyInsightRepository(session), stats, clock, llm=scoped(llm, "insight"))
     return RetroService(
-        SqlAlchemyRetroRepository(session), stats, study, urges, missions, insights, profiles, llm, clock,
+        SqlAlchemyRetroRepository(session),
+        stats,
+        study,
+        urges,
+        missions,
+        insights,
+        profiles,
+        scoped(llm, "retro"),
+        clock,
     )
 
 
-async def _run_user(user_id: UUID, llm: LLMClient, settings: Settings, clock: Clock) -> bool:
+async def _run_user(user_id: UUID, inner_llm: LLMClient, settings: Settings, clock: Clock) -> bool:
     async with AsyncSessionLocal() as session:
         async with session.begin():  # one transaction per user: a failure rolls back only that user
             if settings.rls_enforced:
                 await apply_rls_context(session, user_id)
+            llm = BudgetedLLM(
+                inner_llm,
+                SqlAlchemyLlmUsageRepository(session),
+                user_id,
+                settings.llm_daily_call_cap,
+                "retro",
+                clock,
+            )
             _, created = await build_retro_service(session, llm, settings, clock).generate(user_id, None)
             return created
 
 
 async def run_once(llm: LLMClient | None = None, clock: Clock = utc_now) -> dict[str, int]:
     settings = get_settings()
-    llm = llm or GroqClient()
+    llm = llm or GroqClient(
+        settings.groq_api_key,
+        settings.groq_model,
+        settings.groq_timeout_seconds,
+        settings.groq_base_url,
+    )
     counts = {"users": 0, "retros": 0, "errors": 0}
     for user_id in await active_user_ids(clock):
         counts["users"] += 1
@@ -108,6 +133,7 @@ async def run_once(llm: LLMClient | None = None, clock: Clock = utc_now) -> dict
             logger.exception("retro generation failed for user %s", user_id)
     logger.info("retro job finished: %s", counts)
     return counts
+
 
 
 def main() -> None:

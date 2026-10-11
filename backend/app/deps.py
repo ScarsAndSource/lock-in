@@ -1,8 +1,9 @@
-from __future__ import annotations
+from uuid import UUID
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
@@ -10,6 +11,7 @@ from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.goal_repository import SqlAlchemyGoalRepository, SqlAlchemyIntentionRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
+from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
@@ -17,14 +19,15 @@ from app.repositories.screen_time_repository import SqlAlchemyScreenTimeReposito
 from app.repositories.sleep_repository import SqlAlchemySleepRepository
 from app.repositories.study_repository import SqlAlchemyStudySessionRepository, SqlAlchemySubjectRepository
 from app.repositories.urge_repository import SqlAlchemyUrgeRepository
-from app.security import FieldEncryptor, get_field_encryptor
+from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor
 from app.services.account_service import AccountService
+from app.services.chat_service import ChatService
 from app.services.checkins_service import CheckinsService
 from app.services.goals_service import GoalsService
 from app.services.habits_service import HabitsService
 from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
-from app.services.llm import GroqClient, LLMClient
+from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
 from app.services.profile_service import ProfileService
 from app.services.retro_service import RetroService
@@ -74,6 +77,11 @@ def get_retro_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyR
 
 def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyInsightRepository:
     return SqlAlchemyInsightRepository(session)
+
+
+def get_llm_usage_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyLlmUsageRepository:
+    return SqlAlchemyLlmUsageRepository(session)
+
 
 
 def get_subject_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemySubjectRepository:
@@ -165,9 +173,20 @@ def get_account_service(
     return AccountService(repo, encryptor, clock)
 
 
-def get_llm_client() -> LLMClient:
-    """Returns a GroqClient instance. Raises LLMUnavailableError at call time (stub until Slice 7)."""
-    return GroqClient()
+def get_llm_client(
+    user_id: UUID = Depends(get_current_user_id),
+    usage: SqlAlchemyLlmUsageRepository = Depends(get_llm_usage_repository),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+) -> LLMClient:
+    """Groq behind the per-user daily cap. With no GROQ_API_KEY every call raises LLMUnavailableError at call time and callers use their deterministic fallbacks."""
+    inner = GroqClient(
+        settings.groq_api_key,
+        settings.groq_model,
+        settings.groq_timeout_seconds,
+        settings.groq_base_url,
+    )
+    return BudgetedLLM(inner, usage, user_id, settings.llm_daily_call_cap, "chat", clock)
 
 
 def get_study_service(
@@ -216,8 +235,9 @@ def get_insights_service(
     repo: SqlAlchemyInsightRepository = Depends(get_insight_repository),
     stats: StatsService = Depends(get_stats_service),
     clock: Clock = Depends(get_clock),
+    llm: LLMClient = Depends(get_llm_client),
 ) -> InsightsService:
-    return InsightsService(repo, stats, clock)
+    return InsightsService(repo, stats, clock, llm=scoped(llm, "insight"))
 
 
 def get_retro_service(
@@ -231,4 +251,18 @@ def get_retro_service(
     llm: LLMClient = Depends(get_llm_client),
     clock: Clock = Depends(get_clock),
 ) -> RetroService:
-    return RetroService(repo, stats, study, urges, missions, insights, profiles, llm, clock)
+    return RetroService(repo, stats, study, urges, missions, insights, profiles, scoped(llm, "retro"), clock)
+
+
+def get_chat_service(
+    stats: StatsService = Depends(get_stats_service),
+    study: StudyService = Depends(get_study_service),
+    urges: UrgesService = Depends(get_urges_service),
+    goals: GoalsService = Depends(get_goals_service),
+    missions: MissionsService = Depends(get_missions_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    llm: LLMClient = Depends(get_llm_client),
+    clock: Clock = Depends(get_clock),
+) -> ChatService:
+    return ChatService(stats, study, urges, goals, missions, profiles, scoped(llm, "chat"), clock)
+

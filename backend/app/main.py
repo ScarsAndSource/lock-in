@@ -11,10 +11,12 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.db import engine, ping_database
-from app.exceptions import ConflictError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError
+from app.exceptions import (
+    ConflictError, DailyLimitError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError,
+)
 from app.routers import (
-    checkins, goals, habits, insights, intentions, missions, profile, retros, screen_time, sleep, stats,
-    study, urges,
+    chat, checkins, goals, habits, insights, intentions, missions, profile, retros, screen_time, sleep, stats,
+    study, support, urges,
 )
 from app.schema_check import check_schema
 
@@ -87,6 +89,15 @@ async def rate_limited_handler(request: Request, exc: RateLimitedError) -> JSONR
     )
 
 
+@app.exception_handler(DailyLimitError)
+async def daily_limit_handler(request: Request, exc: DailyLimitError) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": "You've used today's AI allowance. It resets at 00:00 UTC."},
+        headers={"Retry-After": str(exc.retry_after)},
+    )
+
+
 @app.exception_handler(DataIntegrityError)
 async def integrity_handler(request: Request, exc: DataIntegrityError) -> JSONResponse:
     logger.error("DATA INTEGRITY: %s request_id=%s", exc, getattr(request.state, "request_id", "?"))
@@ -117,6 +128,7 @@ async def ready():
 
 for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
-    study, urges, goals, intentions,
+    study, urges, goals, intentions, chat, support,
 ):
     app.include_router(module.router)
+
