@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getConsistency } from '../api/stats';
-import { getHabits, createHabit } from '../api/habits';
+import { createHabit } from '../api/habits';
 import {
   getSubjects,
   bulkCreateSubjects,
-  getStudySessions,
   logStudySession,
   getStudySummary,
   getUrges,
@@ -23,11 +22,12 @@ import {
   PauseOverview,
   PausePreset,
 } from '../types';
+import { formatComeback, formatMinutes, formatPct, errorMessage } from '../lib/format';
 
 type TrackDomain = 'habits' | 'sleep' | 'screen' | 'study' | 'urges' | 'pauses';
 
 export const TrackView: React.FC = () => {
-  const { showToast, setUrgeQuickModalOpen } = useApp();
+  const { showToast, setUrgeQuickModalOpen, activeDate, dataEpoch, demoMode, bumpData } = useApp();
   const [selectedDomain, setSelectedDomain] = useState<TrackDomain>('habits');
 
   // Domain states
@@ -54,14 +54,12 @@ export const TrackView: React.FC = () => {
 
   const loadAll = async () => {
     try {
-      const [cons, _habs, subjs, _sess, summ, urg, urgSumm, pauseOver] = await Promise.all([
-        getConsistency(),
-        getHabits(),
+      const [cons, subjs, summ, urg, urgSumm, pauseOver] = await Promise.all([
+        getConsistency(30, activeDate),
         getSubjects(),
-        getStudySessions(),
-        getStudySummary(),
-        getUrges(),
-        getUrgeSummary(),
+        getStudySummary(activeDate, 30),
+        getUrges(activeDate, 14, true),
+        getUrgeSummary(14),
         getPauseOverview(),
       ]);
       setConsistency(cons);
@@ -74,24 +72,25 @@ export const TrackView: React.FC = () => {
         setSessionSubjectId(subjs[0].id);
       }
     } catch (e) {
-      console.warn('TrackView load error:', e);
+      showToast(errorMessage(e, 'Could not load tracking data'));
     }
   };
 
   useEffect(() => {
     loadAll();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDate, demoMode, dataEpoch]);
 
   const handleCreateHabit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newHabitName.trim()) return;
     try {
       await createHabit(newHabitName.trim(), { type: 'n_per_week', count: newHabitCount });
-      showToast('Habit registered!');
+      showToast('Habit registered');
       setNewHabitName('');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error creating habit');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error creating habit'));
     }
   };
 
@@ -100,27 +99,31 @@ export const TrackView: React.FC = () => {
     if (!bulkSubjectsText.trim()) return;
     try {
       await bulkCreateSubjects(bulkSubjectsText.trim());
-      showToast('Subjects added!');
+      showToast('Subjects added');
       setBulkSubjectsText('');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error adding subjects');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error adding subjects'));
     }
   };
 
   const handleLogStudy = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (!sessionSubjectId) {
+        showToast('Add a subject first');
+        return;
+      }
       await logStudySession({
-        log_date: '2026-12-31',
-        subject_id: sessionSubjectId || undefined,
+        log_date: activeDate,
+        subject_id: sessionSubjectId,
         planned_minutes: sessionPlanned,
         actual_minutes: sessionActual,
       });
-      showToast('Study session logged!');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error logging session');
+      showToast('Study session logged');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error logging session'));
     }
   };
 
@@ -128,15 +131,15 @@ export const TrackView: React.FC = () => {
     e.preventDefault();
     try {
       await logSleep({
-        log_date: '2026-12-31',
+        log_date: activeDate,
         time_to_bed: sleepBed,
         time_woke: sleepWake,
         self_rated_quality: sleepQual,
       });
-      showToast('Sleep entry recorded!');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error');
+      showToast('Sleep entry recorded');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Could not save sleep'));
     }
   };
 
@@ -144,13 +147,13 @@ export const TrackView: React.FC = () => {
     e.preventDefault();
     try {
       await logScreenTime({
-        log_date: '2026-12-31',
+        log_date: activeDate,
         total_minutes: screenMinutes,
       });
-      showToast('Screen time logged!');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error');
+      showToast('Screen time logged');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Could not save screen time'));
     }
   };
 
@@ -158,19 +161,19 @@ export const TrackView: React.FC = () => {
     try {
       await quickPause(preset, habitId);
       showToast(`Pause applied: ${preset.replace('_', ' ')}`);
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error applying pause');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error applying pause'));
     }
   };
 
   const handleResume = async (habitId?: string) => {
     try {
       await resumePause(habitId);
-      showToast('Resumed schedule!');
-      loadAll();
-    } catch (err: any) {
-      showToast(err?.message || 'Error');
+      showToast('Resumed schedule');
+      bumpData();
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Could not resume'));
     }
   };
 
@@ -211,7 +214,7 @@ export const TrackView: React.FC = () => {
                 Rolling 30-Day Consistency
               </span>
               <span className="font-title text-title text-ink font-bold">
-                {consistency?.overall_pct || 84.6}%
+                {formatPct(consistency?.overall_pct)}
               </span>
             </div>
             <p className="font-caption text-caption text-muted-text">
@@ -227,13 +230,13 @@ export const TrackView: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="font-small-medium text-ink font-semibold">{h.habit_name}</span>
                   <span className="font-small-medium text-domain-habits-fill font-bold">
-                    {h.consistency_pct || 0}%
+                    {formatPct(h.consistency_pct, 0)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between font-caption text-caption text-muted-text">
                   <span>Current: {h.current_run} {h.run_unit}</span>
                   <span>Longest: {h.longest_run} {h.run_unit}</span>
-                  <span>Comeback: {Math.round((h.comeback_rate || 0.8) * 100)}%</span>
+                  <span>Comeback: {formatComeback(h.comeback_rate)}</span>
                 </div>
               </div>
             ))}
@@ -394,7 +397,7 @@ export const TrackView: React.FC = () => {
               </span>
             </div>
             <p className="font-caption text-caption text-muted-text">
-              {studySummary?.days_studied || 18} days studied · {studySummary?.total_actual || 145} total min logged
+              {studySummary?.days_studied ?? 0} days studied · {formatMinutes(studySummary?.total_actual ?? 0)} total logged
             </p>
           </div>
 

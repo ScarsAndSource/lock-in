@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { localTodayISO } from '../lib/dates';
 import {
   getProfile,
   patchProfile,
@@ -10,6 +11,7 @@ import {
   deleteAccount,
 } from '../api/profile';
 import { Profile, Intention, MissionDetail, Domain } from '../types';
+import { errorMessage } from '../lib/format';
 
 export const MoreView: React.FC = () => {
   const { demoMode, toggleDemoMode, token, saveToken, showToast } = useApp();
@@ -41,8 +43,8 @@ export const MoreView: React.FC = () => {
       const updated = await patchProfile(timezoneInput);
       setProfile(updated);
       showToast('Timezone updated!');
-    } catch (err: any) {
-      showToast(err?.message || 'Error updating timezone');
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error updating timezone'));
     }
   };
 
@@ -64,8 +66,8 @@ export const MoreView: React.FC = () => {
       setCueInput('');
       setActionInput('');
       showToast('If-then pre-commitment locked!');
-    } catch (err: any) {
-      showToast(err?.message || 'Error creating intention');
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error creating intention'));
     }
   };
 
@@ -80,8 +82,8 @@ export const MoreView: React.FC = () => {
       a.click();
       URL.revokeObjectURL(url);
       showToast('Account data exported!');
-    } catch (err: any) {
-      showToast(err?.message || 'Export error');
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Export error'));
     }
   };
 
@@ -94,8 +96,8 @@ export const MoreView: React.FC = () => {
       await deleteAccount();
       showToast('Data deleted.');
       window.location.reload();
-    } catch (err: any) {
-      showToast(err?.message || 'Error deleting data');
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error deleting data'));
     } finally {
       setIsDeleting(false);
     }
@@ -234,7 +236,7 @@ export const MoreView: React.FC = () => {
           </div>
           <div className="flex items-center justify-between font-caption text-caption text-muted-text">
             <span>Profile Sync Date:</span>
-            <strong className="text-ink">{profile?.today || '2026-12-31'}</strong>
+            <strong className="text-ink">{profile?.today || localTodayISO()}</strong>
           </div>
           <button
             type="submit"

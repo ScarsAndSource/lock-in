@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { getChatThreads, getThreadDetail, sendMessage } from '../api/chat';
 import { Thread, ChatMessage } from '../types';
+import { errorMessage } from '../lib/format';
 
 export const ChatView: React.FC = () => {
   const { showToast } = useApp();
@@ -48,8 +49,8 @@ export const ChatView: React.FC = () => {
         setActiveThreadId(res.thread.id);
         setThreads((prev) => [res.thread, ...prev]);
       }
-    } catch (err: any) {
-      showToast(err?.message || 'Error communicating with assistant');
+    } catch (err: unknown) {
+      showToast(errorMessage(err, 'Error communicating with assistant'));
     } finally {
       setIsSending(false);
     }
