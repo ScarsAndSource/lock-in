@@ -33,6 +33,7 @@ from app.services.intentions_service import IntentionsService
 from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
 from app.services.pauses_service import PausesService
+from app.services.pause_shortcuts_service import PauseShortcutsService
 from app.services.profile_service import ProfileService
 from app.services.retro_service import RetroService
 from app.services.screen_time_service import ScreenTimeService
@@ -304,3 +305,11 @@ def get_chat_threads_service(
     return ChatThreadsService(repo, chat, encryptor, profiles, settings.chat_retention_days, clock)
 
 
+def get_pause_shortcuts_service(
+    pauses: PausesService = Depends(get_pauses_service),
+    repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    habits: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> PauseShortcutsService:
+    return PauseShortcutsService(pauses, repo, habits, profiles, clock)
