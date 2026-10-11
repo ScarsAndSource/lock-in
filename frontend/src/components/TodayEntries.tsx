@@ -1,113 +1,123 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { captureUrge } from '../api/tracking';
+import { captureUrge, getStudySessions, getUrges } from '../api/tracking';
 import { logHabit } from '../api/habits';
-import { HabitStatus } from '../types';
+import { HabitStatus, StudySession, UrgeLog } from '../types';
+import { formatMinutes, errorMessage } from '../lib/format';
+import { toTimeInput } from '../lib/dates';
 
 interface TodayEntriesProps {
   onOpenCheckin?: () => void;
   onOpenUrgeCapture?: () => void;
 }
 
-export const TodayEntries: React.FC<TodayEntriesProps> = ({
-  onOpenCheckin,
-  onOpenUrgeCapture,
-}) => {
-  const { showToast, activeDate } = useApp();
-  const [habitStatus, setHabitStatus] = useState<HabitStatus>('done');
-  const [urgeStatus, setUrgeStatus] = useState<'resisted' | 'relapsed' | null>(null);
+export const TodayEntries: React.FC<TodayEntriesProps> = ({ onOpenCheckin, onOpenUrgeCapture }) => {
+  const { showToast, activeDate, checkinView, bumpData, dataEpoch, demoMode } = useApp();
+  const [todayUrges, setTodayUrges] = useState<UrgeLog[]>([]);
+  const [todayStudy, setTodayStudy] = useState<StudySession[]>([]);
+  const [pendingHabit, setPendingHabit] = useState<string | null>(null);
 
-  const handleHabitToggle = async (status: HabitStatus) => {
-    setHabitStatus(status);
-    showToast(`Gym status updated to ${status}`);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getUrges(activeDate, 2, true), getStudySessions(activeDate, 2)])
+      .then(([urges, sessions]) => {
+        if (cancelled) return;
+        setTodayUrges(urges.filter((u) => u.log_date === activeDate));
+        setTodayStudy(sessions.filter((s) => s.log_date === activeDate));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTodayUrges([]);
+          setTodayStudy([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDate, dataEpoch, demoMode]);
+
+  const entries = checkinView?.entries.filter((e) => e.is_scheduled !== false) ?? [];
+  const sleep = checkinView?.sleep.logged;
+  const screen = checkinView?.screen_time.logged;
+  const latestUrge = todayUrges[0] ?? null;
+
+  const handleHabitToggle = async (habitId: string, status: HabitStatus) => {
+    setPendingHabit(habitId);
     try {
-      await logHabit('habit-1', activeDate, status);
-    } catch {
-      // offline/demo fallback already handles
+      await logHabit(habitId, activeDate, status);
+      bumpData();
+      showToast(`Habit updated to ${status}`);
+    } catch (err) {
+      showToast(errorMessage(err, 'Could not update habit'));
+    } finally {
+      setPendingHabit(null);
     }
   };
 
   const handleUrgeAction = async (outcome: 'resisted' | 'relapsed') => {
-    setUrgeStatus(outcome);
-    showToast(`Urge recorded as ${outcome}`);
     try {
-      await captureUrge({
-        outcome,
-        occurred_at: new Date().toISOString(),
-        trigger_context: 'Evening craving - tired after work',
-      });
-    } catch {
-      // fallback handles
+      await captureUrge({ outcome });
+      bumpData();
+      showToast(`Urge recorded as ${outcome}`);
+    } catch (err) {
+      showToast(errorMessage(err, 'Could not log urge'));
     }
   };
+
+  const studyMinutes = todayStudy.reduce((sum, s) => sum + s.actual_minutes, 0);
+  const studyLabel = todayStudy[0]?.subject_name || 'Study';
 
   return (
     <section className="w-full flex flex-col mb-4">
       <div className="flex items-baseline justify-between mb-2 px-1">
         <h3 className="font-section text-section text-ink">Today's entries</h3>
-        <span className="font-caption text-caption text-muted-text">4 of 5 active</span>
+        <span className="font-caption text-caption text-muted-text">
+          {entries.length} habit{entries.length === 1 ? '' : 's'} scheduled
+        </span>
       </div>
 
-      {/* Tabular list on Surface */}
       <div className="w-full bg-surface rounded-xl overflow-hidden border border-line shadow-sm">
-        {/* Row 1: Habits */}
-        <div className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface hover:bg-surface-container-low transition-colors">
-          <div className="flex items-center gap-3 min-w-0">
-            <svg className="shrink-0" height="14" viewBox="0 0 14 14" width="14">
-              <circle cx="7" cy="7" fill="#C84A21" r="6" />
-            </svg>
-            <div className="flex flex-col min-w-0">
-              <span className="font-small-medium text-small-medium text-ink truncate">
-                Gym: same as usual.
-              </span>
-              <span className="font-caption text-caption text-muted-text">
-                Upper body push · 45 min
-              </span>
+        {entries.length === 0 && (
+          <div className="p-3.5 font-caption text-caption text-muted-text">
+            No habits scheduled for this date. Add one on Track.
+          </div>
+        )}
+
+        {entries.map((entry, idx) => (
+          <div key={entry.habit_id}>
+            {idx > 0 && <div className="w-full h-[1px] bg-surface-container" />}
+            <div className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface">
+              <div className="flex items-center gap-3 min-w-0">
+                <svg className="shrink-0" height="14" viewBox="0 0 14 14" width="14">
+                  <circle cx="7" cy="7" fill="#C84A21" r="6" />
+                </svg>
+                <div className="flex flex-col min-w-0">
+                  <span className="font-small-medium text-small-medium text-ink truncate">{entry.habit_name}</span>
+                  <span className="font-caption text-caption text-muted-text truncate">{entry.reason}</span>
+                </div>
+              </div>
+              <div className="flex items-center bg-surface-container p-0.5 rounded-lg shrink-0">
+                {(['done', 'partial', 'skipped'] as HabitStatus[]).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    disabled={pendingHabit === entry.habit_id}
+                    onClick={() => handleHabitToggle(entry.habit_id, status)}
+                    className={`px-2.5 py-1 rounded font-caption text-caption transition-colors ${
+                      entry.status === status
+                        ? 'bg-ink text-ground-chalk font-semibold'
+                        : 'text-ink hover:bg-surface-variant'
+                    }`}
+                  >
+                    {status === 'done' ? 'Done' : status === 'partial' ? 'Part' : 'Miss'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+        ))}
 
-          {/* Habit Status Segmented Control */}
-          <div className="flex items-center bg-surface-container p-0.5 rounded-lg shrink-0">
-            <button
-              type="button"
-              onClick={() => handleHabitToggle('done')}
-              className={`px-2.5 py-1 rounded font-caption text-caption transition-colors ${
-                habitStatus === 'done'
-                  ? 'bg-ink text-ground-chalk font-semibold'
-                  : 'text-ink hover:bg-surface-variant'
-              }`}
-            >
-              Done
-            </button>
-            <button
-              type="button"
-              onClick={() => handleHabitToggle('partial')}
-              className={`px-2.5 py-1 rounded font-caption text-caption transition-colors ${
-                habitStatus === 'partial'
-                  ? 'bg-ink text-ground-chalk font-semibold'
-                  : 'text-ink hover:bg-surface-variant'
-              }`}
-            >
-              Part
-            </button>
-            <button
-              type="button"
-              onClick={() => handleHabitToggle('skipped')}
-              className={`px-2.5 py-1 rounded font-caption text-caption transition-colors ${
-                habitStatus === 'skipped'
-                  ? 'bg-ink text-ground-chalk font-semibold'
-                  : 'text-ink hover:bg-surface-variant'
-              }`}
-            >
-              Miss
-            </button>
-          </div>
-        </div>
-
-        {/* Divider */}
         <div className="w-full h-[1px] bg-surface-container" />
-
-        {/* Row 2: Sleep */}
         <div
           onClick={onOpenCheckin}
           className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface hover:bg-surface-container-low transition-colors cursor-pointer"
@@ -118,22 +128,25 @@ export const TodayEntries: React.FC<TodayEntriesProps> = ({
             </svg>
             <div className="flex flex-col min-w-0">
               <span className="font-small-medium text-small-medium text-ink truncate">
-                7 hr 15 min
+                {formatMinutes(sleep?.duration_minutes)}
               </span>
               <span className="font-caption text-caption text-muted-text">
-                11:30 pm to 6:45 am
+                {sleep
+                  ? `${toTimeInput(sleep.time_to_bed, '—')} to ${toTimeInput(sleep.time_woke, '—')}`
+                  : 'Not logged — tap to check in'}
               </span>
             </div>
           </div>
-          <div className="px-2.5 py-1 rounded bg-domain-sleep-tint text-domain-sleep-fill font-caption text-caption shrink-0 font-medium">
-            Logged
+          <div
+            className={`px-2.5 py-1 rounded font-caption text-caption shrink-0 font-medium ${
+              sleep ? 'bg-domain-sleep-tint text-domain-sleep-fill' : 'bg-surface-container text-muted-text'
+            }`}
+          >
+            {sleep ? (sleep.is_default ? 'Default' : 'Logged') : 'Open'}
           </div>
         </div>
 
-        {/* Divider */}
         <div className="w-full h-[1px] bg-surface-container" />
-
-        {/* Row 3: Screen */}
         <div
           onClick={onOpenCheckin}
           className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface hover:bg-surface-container-low transition-colors cursor-pointer"
@@ -144,73 +157,52 @@ export const TodayEntries: React.FC<TodayEntriesProps> = ({
             </svg>
             <div className="flex flex-col min-w-0">
               <span className="font-small-medium text-small-medium text-ink truncate">
-                3 hr 10 min
+                {formatMinutes(screen?.total_minutes)}
               </span>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="w-8 h-1.5 rounded-sm bg-domain-screen-fill" />
-                <span className="font-caption text-caption text-muted-text">Within limit</span>
-              </div>
+              <span className="font-caption text-caption text-muted-text">
+                {screen?.is_default ? 'Guess from your usual' : screen ? 'Manual log' : 'Not logged'}
+              </span>
             </div>
           </div>
-          <div className="px-2.5 py-1 rounded bg-surface-container-low text-ink font-caption text-caption shrink-0 flex items-center gap-1 border border-surface-container">
-            <span className="w-1.5 h-1.5 rounded-full bg-domain-screen-fill" />
-            <span>Guess</span>
+          <div className="px-2.5 py-1 rounded bg-surface-container-low text-ink font-caption text-caption shrink-0 border border-surface-container">
+            {screen ? (screen.is_default ? 'Guess' : 'Logged') : 'Open'}
           </div>
         </div>
 
-        {/* Divider */}
         <div className="w-full h-[1px] bg-surface-container" />
-
-        {/* Row 4: Urges */}
-        <div className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface hover:bg-surface-container-low transition-colors">
-          <div
-            onClick={onOpenUrgeCapture}
-            className="flex items-center gap-3 min-w-0 cursor-pointer flex-1"
-          >
+        <div className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface">
+          <div onClick={onOpenUrgeCapture} className="flex items-center gap-3 min-w-0 cursor-pointer flex-1">
             <svg className="shrink-0" height="14" viewBox="0 0 14 14" width="14">
               <path d="M 1 7 Q 4 3 7 7 T 13 7" fill="none" stroke="#92405F" strokeLinecap="round" strokeWidth="2" />
             </svg>
             <div className="flex flex-col min-w-0">
               <span className="font-small-medium text-small-medium text-ink truncate">
-                Evening craving
+                {latestUrge ? `Urge ${latestUrge.outcome}` : 'Urge quick-capture'}
               </span>
-              <span className="font-caption text-caption text-muted-text">
-                Trigger: tired after work
+              <span className="font-caption text-caption text-muted-text truncate">
+                {latestUrge?.trigger_context || (todayUrges.length ? `${todayUrges.length} today` : '2-tap log — no form required')}
               </span>
             </div>
           </div>
-
-          {/* Dual Outline Buttons (ink styled) */}
-          <div className="flex items-center gap-1.5 shrink-0" id="urge-actions">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => handleUrgeAction('resisted')}
-              className={`h-8 px-3 rounded font-caption text-caption transition-colors ${
-                urgeStatus === 'resisted'
-                  ? 'bg-ink text-ground-chalk font-semibold'
-                  : 'bg-surface-container text-ink hover:bg-secondary-fixed'
-              }`}
+              className="h-8 px-3 rounded font-caption text-caption bg-surface-container text-ink hover:bg-secondary-fixed"
             >
               Resisted
             </button>
             <button
               type="button"
               onClick={() => handleUrgeAction('relapsed')}
-              className={`h-8 px-3 rounded font-caption text-caption transition-colors ${
-                urgeStatus === 'relapsed'
-                  ? 'bg-ink text-ground-chalk font-semibold'
-                  : 'bg-surface-container text-ink hover:bg-secondary-fixed'
-              }`}
+              className="h-8 px-3 rounded font-caption text-caption bg-surface-container text-ink hover:bg-secondary-fixed"
             >
               Relapsed
             </button>
           </div>
         </div>
 
-        {/* Divider */}
         <div className="w-full h-[1px] bg-surface-container" />
-
-        {/* Row 5: Study */}
         <div
           onClick={onOpenCheckin}
           className="min-h-[58px] p-3.5 flex items-center justify-between gap-3 bg-surface hover:bg-surface-container-low transition-colors cursor-pointer"
@@ -220,16 +212,18 @@ export const TodayEntries: React.FC<TodayEntriesProps> = ({
               <polygon fill="#4F7A2E" points="7,1 13,12 1,12" />
             </svg>
             <div className="flex flex-col min-w-0">
-              <span className="font-small-medium text-small-medium text-ink truncate">
-                Algorithms & Systems
-              </span>
+              <span className="font-small-medium text-small-medium text-ink truncate">{studyLabel}</span>
               <span className="font-caption text-caption text-muted-text">
-                85 min · Follow-through 94%
+                {todayStudy.length ? `${formatMinutes(studyMinutes)} · log more on Track` : 'No session today — log on Track'}
               </span>
             </div>
           </div>
-          <div className="px-2.5 py-1 rounded bg-domain-study-tint text-domain-study-fill font-caption text-caption shrink-0 font-medium">
-            Logged
+          <div
+            className={`px-2.5 py-1 rounded font-caption text-caption shrink-0 font-medium ${
+              todayStudy.length ? 'bg-domain-study-tint text-domain-study-fill' : 'bg-surface-container text-muted-text'
+            }`}
+          >
+            {todayStudy.length ? 'Logged' : 'Empty'}
           </div>
         </div>
       </div>

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { captureUrge } from '../api/tracking';
-import { UrgeOutcome } from '../types';
+import { getDueIntentions } from '../api/profile';
+import { DueIntention, UrgeOutcome } from '../types';
+import { errorMessage } from '../lib/format';
 
 interface UrgeQuickModalProps {
   isOpen: boolean;
@@ -9,33 +11,40 @@ interface UrgeQuickModalProps {
 }
 
 export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose }) => {
-  const { showToast } = useApp();
-  const [intensity, setIntensity] = useState<number>(6);
+  const { showToast, bumpData } = useApp();
+  const [intensity, setIntensity] = useState(6);
   const [triggerContext, setTriggerContext] = useState('');
   const [copingStrategy, setCopingStrategy] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [due, setDue] = useState<DueIntention[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setIntensity(6);
+    setTriggerContext('');
+    setCopingStrategy('');
+    getDueIntentions('urge')
+      .then(setDue)
+      .catch(() => setDue([]));
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleQuickLog = async (selectedOutcome: UrgeOutcome) => {
     setIsSubmitting(true);
     try {
+      const hasDetail = Boolean(triggerContext.trim() || copingStrategy.trim());
       await captureUrge({
         outcome: selectedOutcome,
-        occurred_at: new Date().toISOString(),
-        intensity: triggerContext || copingStrategy ? intensity : null,
+        intensity: hasDetail ? intensity : null,
         trigger_context: triggerContext.trim() || null,
         coping_strategy: copingStrategy.trim() || null,
       });
-
-      showToast(`Urge logged: ${selectedOutcome.toUpperCase()}! Zero judgment.`);
+      bumpData();
+      showToast(`Urge logged: ${selectedOutcome}`);
       onClose();
-      // reset
-      setTriggerContext('');
-      setCopingStrategy('');
-    } catch (err: any) {
-      showToast(err?.message || 'Urge captured locally');
-      onClose();
+    } catch (err) {
+      showToast(errorMessage(err, 'Could not log urge'));
     } finally {
       setIsSubmitting(false);
     }
@@ -44,7 +53,6 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
       <div className="w-full max-w-md bg-ground-chalk rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-line animate-slideUp space-y-4">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <span className="font-caption text-caption text-domain-urges-fill uppercase tracking-wider font-semibold block">
@@ -62,16 +70,26 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
         </div>
 
         <p className="font-small text-small text-muted-text leading-relaxed">
-          In the moment, don't worry about forms. Tap once. An imperfect log beats no log.
+          In the moment, don't fill a form. Tap once. An imperfect log beats no log.
         </p>
 
-        {/* 2 Big Primary Tap Buttons */}
+        {due[0] && (
+          <div className="p-3 bg-surface-container rounded-lg">
+            <span className="font-caption text-caption text-muted-text uppercase tracking-wider block mb-1">
+              If-then cue
+            </span>
+            <p className="font-small text-ink">
+              IF {due[0].intention.cue} THEN {due[0].intention.action}
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             type="button"
             disabled={isSubmitting}
             onClick={() => handleQuickLog('resisted')}
-            className="h-16 rounded-xl bg-ink text-ground-chalk flex flex-col items-center justify-center font-body-strong text-body-strong hover:bg-secondary active:scale-[0.98] transition-all"
+            className="h-16 rounded-xl bg-ink text-ground-chalk flex flex-col items-center justify-center font-body-strong text-body-strong hover:bg-secondary active:scale-[0.98] transition-all disabled:opacity-50"
           >
             <span className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[20px] text-domain-study-tint">shield</span>
@@ -84,7 +102,7 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
             type="button"
             disabled={isSubmitting}
             onClick={() => handleQuickLog('relapsed')}
-            className="h-16 rounded-xl bg-surface-container text-ink border border-line flex flex-col items-center justify-center font-body-strong text-body-strong hover:bg-secondary-fixed active:scale-[0.98] transition-all"
+            className="h-16 rounded-xl bg-surface-container text-ink border border-line flex flex-col items-center justify-center font-body-strong text-body-strong hover:bg-secondary-fixed active:scale-[0.98] transition-all disabled:opacity-50"
           >
             <span className="flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[20px] text-domain-urges-fill">refresh</span>
@@ -94,7 +112,6 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
           </button>
         </div>
 
-        {/* Optional Context Accordion / Inputs */}
         <details className="group pt-2">
           <summary className="font-caption text-caption text-muted-text cursor-pointer hover:text-ink list-none flex items-center justify-between py-1 select-none">
             <span>Optional: add context or coping note</span>

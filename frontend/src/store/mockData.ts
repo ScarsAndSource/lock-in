@@ -18,11 +18,16 @@ import type {
   PauseOverview,
   Profile,
 } from '../types';
+import { localTodayISO, addDaysISO } from '../lib/dates';
+
+// All demo dates are computed relative to today so they are always current.
+const T = localTodayISO(); // today
+const D = (offset: number) => addDaysISO(T, offset); // T-N = D(-N)
 
 export const INITIAL_PROFILE: Profile = {
   timezone: 'Asia/Kolkata',
   tone_preference: 'direct',
-  today: '2026-12-31',
+  today: T,
 };
 
 export const INITIAL_HABITS: Habit[] = [
@@ -47,7 +52,7 @@ export const INITIAL_HABITS: Habit[] = [
 ];
 
 export const INITIAL_CHECKIN_VIEW: CheckinView = {
-  checkin_date: '2026-12-31',
+  checkin_date: T,
   already_confirmed: false,
   entries: [
     {
@@ -56,7 +61,7 @@ export const INITIAL_CHECKIN_VIEW: CheckinView = {
       status: 'done',
       is_default: true,
       is_low_confidence: false,
-      reason: 'Logged done 4 of last 5 Thursdays',
+      reason: 'Logged done 4 of last 5 days',
       is_scheduled: true,
     },
     {
@@ -65,7 +70,7 @@ export const INITIAL_CHECKIN_VIEW: CheckinView = {
       status: 'partial',
       is_default: true,
       is_low_confidence: false,
-      reason: 'Thursday schedule pattern',
+      reason: 'Weekday schedule pattern',
       is_scheduled: true,
     },
     {
@@ -80,7 +85,7 @@ export const INITIAL_CHECKIN_VIEW: CheckinView = {
   ],
   sleep: {
     logged: {
-      log_date: '2026-12-31',
+      log_date: T,
       time_to_bed: '23:30',
       time_woke: '06:45',
       self_rated_quality: 4,
@@ -98,7 +103,7 @@ export const INITIAL_CHECKIN_VIEW: CheckinView = {
   },
   screen_time: {
     logged: {
-      log_date: '2026-12-31',
+      log_date: T,
       total_minutes: 190,
       source: 'manual',
       category_breakdown: { Productivity: 120, Social: 45, Entertainment: 25 },
@@ -114,10 +119,10 @@ export const INITIAL_CHECKIN_VIEW: CheckinView = {
 };
 
 export const INITIAL_CHAIN: ChainOut = {
-  end_date: '2026-12-31',
+  end_date: T,
   days: [
     {
-      day: '2026-12-25',
+      day: D(-6),
       habits: 'good',
       sleep: 'good',
       screen_time: 'partial',
@@ -129,7 +134,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-26',
+      day: D(-5),
       habits: 'partial',
       sleep: 'good',
       screen_time: 'missed',
@@ -141,7 +146,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-27',
+      day: D(-4),
       habits: 'missed',
       sleep: 'partial',
       screen_time: 'good',
@@ -153,7 +158,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-28',
+      day: D(-3),
       habits: 'good',
       sleep: 'good',
       screen_time: 'good',
@@ -165,7 +170,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-29',
+      day: D(-2),
       habits: 'good',
       sleep: 'partial',
       screen_time: 'good',
@@ -177,7 +182,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-30',
+      day: D(-1),
       habits: 'good',
       sleep: 'good',
       screen_time: 'partial',
@@ -189,7 +194,7 @@ export const INITIAL_CHAIN: ChainOut = {
       habits_defaulted: false,
     },
     {
-      day: '2026-12-31',
+      day: T,
       habits: 'good',
       sleep: 'good',
       screen_time: 'partial',
@@ -204,7 +209,7 @@ export const INITIAL_CHAIN: ChainOut = {
 };
 
 export const INITIAL_CONSISTENCY: ConsistencyOut = {
-  end_date: '2026-12-31',
+  end_date: T,
   window_days: 30,
   overall_pct: 84.6,
   habits: [
@@ -242,7 +247,7 @@ export const INITIAL_CONSISTENCY: ConsistencyOut = {
 };
 
 export const INITIAL_PATTERNS: PatternsOut = {
-  end_date: '2026-12-31',
+  end_date: T,
   days: 30,
   patterns: [
     {
@@ -255,7 +260,7 @@ export const INITIAL_PATTERNS: PatternsOut = {
       rate_after_trigger: 0.833,
       baseline_days: 24,
       baseline_rate: 0.125,
-      evidence_dates: ['2026-12-26', '2026-12-20', '2026-12-14', '2026-12-08', '2026-12-02'],
+      evidence_dates: [D(-5), D(-11), D(-17), D(-23), D(-29)],
       statement: 'You skipped gym 5 of the last 6 days when screen time exceeded 2 hours the night before.',
     },
     {
@@ -268,7 +273,7 @@ export const INITIAL_PATTERNS: PatternsOut = {
       rate_after_trigger: 0.8,
       baseline_days: 25,
       baseline_rate: 0.16,
-      evidence_dates: ['2026-12-27', '2026-12-21', '2026-12-15', '2026-12-09'],
+      evidence_dates: [D(-4), D(-10), D(-16), D(-22)],
       statement: 'Sleep deprivation directly triples recorded craving occurrences on the following afternoon.',
     },
   ],
@@ -277,10 +282,11 @@ export const INITIAL_PATTERNS: PatternsOut = {
 export const INITIAL_INSIGHTS: Insight[] = [
   {
     id: 'insight-1',
-    generated_on: '2026-12-31',
-    generated_at: '2026-12-31T08:00:00Z',
+    generated_on: T,
+    generated_at: `${T}T08:00:00Z`,
     pattern_key: 'screen_spikes_lead_to_missed_gym',
-    insight_text: 'You skipped gym 4 of the last 5 days when you slept under 6 hours following a late-night phone session.',
+    insight_text:
+      'You skipped gym 4 of the last 5 days when you slept under 6 hours following a late-night phone session.',
     next_step: 'Set phone into charge mode at 10:45 pm outside arm reach.',
     source_domains: ['screen_time', 'sleep', 'habit'],
     narrated: true,
@@ -288,10 +294,11 @@ export const INITIAL_INSIGHTS: Insight[] = [
   },
   {
     id: 'insight-2',
-    generated_on: '2026-12-30',
-    generated_at: '2026-12-30T08:00:00Z',
+    generated_on: D(-1),
+    generated_at: `${D(-1)}T08:00:00Z`,
     pattern_key: 'study_after_gym_highest_completion',
-    insight_text: 'Study sessions booked immediately following morning exercise had a 94% planned-to-actual follow-through.',
+    insight_text:
+      'Study sessions booked immediately following morning exercise had a 94% planned-to-actual follow-through.',
     next_step: 'Protect the 10:00 am study window right after post-workout breakfast.',
     source_domains: ['study', 'habit'],
     narrated: true,
@@ -299,12 +306,16 @@ export const INITIAL_INSIGHTS: Insight[] = [
   },
 ];
 
+// Week bounds: Mon to today (capped at 7 days)
+const _weekStart = D(-6);
+
 export const INITIAL_RETRO: RetroDetail = {
   id: 'retro-w52',
-  week_start: '2026-12-28',
-  week_end: '2026-12-31',
-  generated_at: '2026-12-31T20:00:00Z',
-  narrative: 'Strong momentum on physical discipline with 4 clean gym sessions. Screen time crept up Tuesday and Wednesday nights, creating friction for Thursday morning focus. You resisted 3 distinct craving triggers without relapse.',
+  week_start: _weekStart,
+  week_end: T,
+  generated_at: `${T}T20:00:00Z`,
+  narrative:
+    'Strong momentum on physical discipline with 4 clean gym sessions. Screen time crept up Tuesday and Wednesday nights, creating friction for Thursday morning focus. You resisted 3 distinct craving triggers without relapse.',
   next_step: 'Lock in sleep timing Friday night before the weekend shift.',
   summary: {
     gym_consistency: '88%',
@@ -315,7 +326,7 @@ export const INITIAL_RETRO: RetroDetail = {
   },
   evidence_refs: {
     days_examined: 7,
-    key_turning_points: ['2026-12-28', '2026-12-30'],
+    key_turning_points: [D(-3), D(-1)],
   },
   narrated: true,
   completed_at: null,
@@ -338,7 +349,7 @@ export const INITIAL_SUBJECTS: Subject[] = [
 export const INITIAL_STUDY_SESSIONS: StudySession[] = [
   {
     id: 'sess-1',
-    log_date: '2026-12-31',
+    log_date: T,
     subject_id: 'subj-1',
     subject_name: 'Algorithms & Data Structures',
     planned_minutes: 90,
@@ -346,7 +357,7 @@ export const INITIAL_STUDY_SESSIONS: StudySession[] = [
   },
   {
     id: 'sess-2',
-    log_date: '2026-12-30',
+    log_date: D(-1),
     subject_id: 'subj-2',
     subject_name: 'AISC / Machine Learning',
     planned_minutes: 60,
@@ -357,8 +368,8 @@ export const INITIAL_STUDY_SESSIONS: StudySession[] = [
 export const INITIAL_URGES: UrgeLog[] = [
   {
     id: 'urge-1',
-    occurred_at: '2026-12-31T20:15:00Z',
-    log_date: '2026-12-31',
+    occurred_at: `${T}T20:15:00Z`,
+    log_date: T,
     outcome: 'resisted',
     intensity: 6,
     has_detail: true,
@@ -368,8 +379,8 @@ export const INITIAL_URGES: UrgeLog[] = [
   },
   {
     id: 'urge-2',
-    occurred_at: '2026-12-30T22:40:00Z',
-    log_date: '2026-12-30',
+    occurred_at: `${D(-1)}T22:40:00Z`,
+    log_date: D(-1),
     outcome: 'resisted',
     intensity: 7,
     has_detail: true,
@@ -380,7 +391,7 @@ export const INITIAL_URGES: UrgeLog[] = [
 ];
 
 export const INITIAL_URGE_SUMMARY: UrgeSummary = {
-  end_date: '2026-12-31',
+  end_date: T,
   window_days: 14,
   total: 6,
   resisted: 5,
@@ -398,7 +409,7 @@ export const INITIAL_INTENTIONS: Intention[] = [
     cue: 'When I feel an urge to endlessly browse late at night',
     action: 'Place phone face-down across the room and drink a full glass of cold water',
     active: true,
-    created_at: '2026-12-15T10:00:00Z',
+    created_at: `${D(-16)}T10:00:00Z`,
   },
   {
     id: 'intent-2',
@@ -407,17 +418,17 @@ export const INITIAL_INTENTIONS: Intention[] = [
     cue: 'If I feel like opening YouTube while working on Algorithms',
     action: 'Close the browser window, stand up for 60 seconds, and write down the next 1 tiny task',
     active: true,
-    created_at: '2026-12-18T14:30:00Z',
+    created_at: `${D(-13)}T14:30:00Z`,
   },
 ];
 
 export const INITIAL_MISSION: MissionDetail = {
   mission: {
     id: 'miss-1',
-    title: 'January 21-Day Lock-In Sprint',
-    start_date: '2026-12-25',
-    end_date: '2027-01-14',
-    status: 'running',
+    title: '21-Day Lock-In Sprint',
+    start_date: D(-6),
+    end_date: D(14),
+    status: 'active',
     ended_at: null,
   },
   progress: {
@@ -430,7 +441,7 @@ export const INITIAL_MISSION: MissionDetail = {
     next_checkpoint: {
       label: 'Checkpoint 1 (Day 10 Audit)',
       day: 10,
-      checkpoint_date: '2027-01-03',
+      checkpoint_date: D(3),
     },
   },
   consistency_pct: 84.6,
@@ -438,15 +449,15 @@ export const INITIAL_MISSION: MissionDetail = {
 };
 
 export const INITIAL_PAUSE_SHORTCUTS: PauseShortcut[] = [
-  { key: 'today', label: 'Today only', start_date: '2026-12-31', end_date: '2026-12-31', days: 1 },
-  { key: '3_days', label: '3 days (recovery)', start_date: '2026-12-31', end_date: '2027-01-02', days: 3 },
-  { key: 'this_week', label: 'Rest of this week', start_date: '2026-12-31', end_date: '2027-01-03', days: 4 },
-  { key: '1_week', label: '1 full week', start_date: '2026-12-31', end_date: '2027-01-06', days: 7 },
-  { key: '2_weeks', label: '2 weeks (exam / travel)', start_date: '2026-12-31', end_date: '2027-01-13', days: 14 },
+  { key: 'today', label: 'Today only', start_date: T, end_date: T, days: 1 },
+  { key: '3_days', label: '3 days (recovery)', start_date: T, end_date: D(2), days: 3 },
+  { key: 'this_week', label: 'Rest of this week', start_date: T, end_date: D(3), days: 4 },
+  { key: '1_week', label: '1 full week', start_date: T, end_date: D(6), days: 7 },
+  { key: '2_weeks', label: '2 weeks (exam / travel)', start_date: T, end_date: D(13), days: 14 },
 ];
 
 export const INITIAL_PAUSE_OVERVIEW: PauseOverview = {
-  today: '2026-12-31',
+  today: T,
   global_pause: null,
   habits: [
     {
@@ -480,8 +491,8 @@ export const INITIAL_THREADS: Thread[] = [
   {
     id: 'thread-1',
     title: 'Workout consistency vs. late sleep',
-    created_at: '2026-12-30T14:00:00Z',
-    last_message_at: '2026-12-31T09:30:00Z',
+    created_at: `${D(-1)}T14:00:00Z`,
+    last_message_at: `${T}T09:30:00Z`,
     message_count: 4,
   },
 ];
@@ -490,20 +501,21 @@ export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   {
     id: 'msg-1',
     role: 'user',
-    content: 'Why did I miss Thursday gym despite planning it?',
+    content: 'Why did I miss gym despite planning it?',
     cited_days: [],
     narrated: false,
-    created_at: '2026-12-31T09:28:00Z',
+    created_at: `${T}T09:28:00Z`,
   },
   {
     id: 'msg-2',
     role: 'assistant',
-    content: 'Looking at your logged chain: your phone screen was active for 220 minutes Wednesday evening until 1:10 am. Your sleep duration dropped from your 7.5 hr baseline down to 5.2 hrs. In your data, whenever you sleep under 6 hrs, your morning workout completion is under 20%.',
+    content:
+      'Looking at your logged chain: your phone screen was active for 220 minutes the previous evening until 1:10 am. Your sleep duration dropped from your 7.5 hr baseline down to 5.2 hrs. In your data, whenever you sleep under 6 hrs, your morning workout completion is under 20%.',
     next_step: 'Place the phone across the room tonight at 10:45 pm.',
     mode: 'answer',
-    cited_days: ['2026-12-30', '2026-12-26'],
+    cited_days: [D(-1), D(-5)],
     narrated: true,
     model: 'llama-3.3-70b-versatile',
-    created_at: '2026-12-31T09:30:00Z',
+    created_at: `${T}T09:30:00Z`,
   },
 ];
