@@ -13,12 +13,19 @@
 | 6 | Goals & Implementation intentions (If-then plans) | ✅ Done |
 | 8 | Weekly retrospective — chain tracing, LLM narration, feedback loop, daily cron job | ✅ Done |
 | 7 | Groq LLM layer, crisis safety net, daily call cap, voice v2, stateless chat | ✅ Done |
+| 7b | Stored chat threads (encrypted at rest, server-side history window, retention pruning) | ✅ Done |
 
 ## Endpoints (current)
 
 ```
 POST   /chat                         stateless chat over logs (?history=[])
 GET    /support/resources            public crisis helplines (?region=)
+POST   /chat/messages                send message in thread (starts new thread if thread_id omitted)
+GET    /chat/threads                 list chat threads (?limit=)
+GET    /chat/threads/{id}            get thread messages (?limit=&before=)
+PATCH  /chat/threads/{id}            rename chat thread
+DELETE /chat/threads/{id}            delete chat thread
+DELETE /chat/threads                 delete all chat threads
 
 POST   /habits                       create habit
 GET    /habits                       list habits (?include_archived=bool)

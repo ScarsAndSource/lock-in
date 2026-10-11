@@ -275,5 +275,30 @@ class LlmUsageORM(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class ChatThreadORM(Base):
+    __tablename__ = "chat_threads"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    title_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChatMessageORM(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    thread_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("chat_threads.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    content_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    next_step_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+
 
 

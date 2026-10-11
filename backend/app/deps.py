@@ -7,6 +7,7 @@ from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
+from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.goal_repository import SqlAlchemyGoalRepository, SqlAlchemyIntentionRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
@@ -22,6 +23,7 @@ from app.repositories.urge_repository import SqlAlchemyUrgeRepository
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor
 from app.services.account_service import AccountService
 from app.services.chat_service import ChatService
+from app.services.chat_threads_service import ChatThreadsService
 from app.services.checkins_service import CheckinsService
 from app.services.goals_service import GoalsService
 from app.services.habits_service import HabitsService
@@ -81,6 +83,10 @@ def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchem
 
 def get_llm_usage_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyLlmUsageRepository:
     return SqlAlchemyLlmUsageRepository(session)
+
+
+def get_chat_thread_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyChatThreadRepository:
+    return SqlAlchemyChatThreadRepository(session)
 
 
 
@@ -265,4 +271,16 @@ def get_chat_service(
     clock: Clock = Depends(get_clock),
 ) -> ChatService:
     return ChatService(stats, study, urges, goals, missions, profiles, scoped(llm, "chat"), clock)
+
+
+def get_chat_threads_service(
+    repo: SqlAlchemyChatThreadRepository = Depends(get_chat_thread_repository),
+    chat: ChatService = Depends(get_chat_service),
+    encryptor: FieldEncryptor = Depends(get_field_encryptor),
+    profiles: ProfileService = Depends(get_profile_service),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+) -> ChatThreadsService:
+    return ChatThreadsService(repo, chat, encryptor, profiles, settings.chat_retention_days, clock)
+
 

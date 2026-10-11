@@ -309,3 +309,26 @@ class Intention:
     active: bool = True
 
 
+@dataclass(slots=True)
+class ChatThread:
+    id: UUID
+    user_id: UUID
+    created_at: datetime
+    last_message_at: datetime
+    title_encrypted: bytes | None = None
+
+
+@dataclass(slots=True)
+class ChatMessage:
+    """Free text is held ENCRYPTED; meta carries only mode/cited_days/narrated/model."""
+    id: UUID
+    thread_id: UUID
+    user_id: UUID
+    role: str  # "user" | "assistant"
+    content_encrypted: bytes
+    created_at: datetime
+    next_step_encrypted: bytes | None = None
+    meta: dict = field(default_factory=dict)
+
+
+

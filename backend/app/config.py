@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     llm_daily_call_cap: int = Field(default=80, ge=1)  # per user per UTC day, all features, retries included
     rate_limit_chat_per_minute: int = Field(default=6, ge=1)
     rate_limit_chat_per_hour: int = Field(default=60, ge=1)
+    chat_retention_days: int = Field(default=90, ge=0)  # stored threads idle this long are pruned; 0 = keep forever
+
 
 
     @model_validator(mode="after")

@@ -17,7 +17,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.deps import (  # noqa: E402
-    get_account_repository, get_checkin_repository, get_clock, get_goal_repository,
+    get_account_repository, get_chat_thread_repository, get_checkin_repository, get_clock, get_goal_repository,
     get_habit_repository, get_insights_service, get_intention_repository,
     get_llm_client, get_mission_repository, get_profile_repository, get_retro_repository,
     get_screen_time_repository, get_sleep_repository, get_study_session_repository,
@@ -37,6 +37,7 @@ from tests.fakes_slices import (  # noqa: E402
     InMemoryGoalRepository, InMemoryIntentionRepository, InMemoryStudySessionRepository,
     InMemorySubjectRepository, InMemoryUrgeRepository,
 )
+from tests.fakes_slice9 import InMemoryChatThreadRepository  # noqa: E402
 
 FIXED_NOW = datetime(2026, 12, 31, 12, 0, tzinfo=timezone.utc)
 
@@ -85,8 +86,10 @@ class ApiWorld:
         self.insight_repo = InsightsService()._repo  # share the same repo instance
         self._clock = lambda: self.now
         self.llm = FakeLLMClient()
+        self.chat_repo = InMemoryChatThreadRepository()
 
         app.dependency_overrides[get_habit_repository] = lambda: self.habit_repo
+        app.dependency_overrides[get_chat_thread_repository] = lambda: self.chat_repo
         app.dependency_overrides[get_checkin_repository] = lambda: self.checkin_repo
         app.dependency_overrides[get_sleep_repository] = lambda: self.sleep_repo
         app.dependency_overrides[get_screen_time_repository] = lambda: self.screen_time_repo
