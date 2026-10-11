@@ -310,6 +310,20 @@ class Intention:
 
 
 @dataclass(slots=True)
+class Pause:
+    """Days the user asked NOT to be judged on. habit_id None = everything; otherwise just that habit."""
+    id: UUID
+    user_id: UUID
+    start_date: date
+    end_date: date
+    created_at: datetime
+    habit_id: UUID | None = None
+
+    def covers(self, day: date) -> bool:
+        return self.start_date <= day <= self.end_date
+
+
+@dataclass(slots=True)
 class ChatThread:
     id: UUID
     user_id: UUID

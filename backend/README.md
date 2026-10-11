@@ -14,6 +14,7 @@
 | 8 | Weekly retrospective — chain tracing, LLM narration, feedback loop, daily cron job | ✅ Done |
 | 7 | Groq LLM layer, crisis safety net, daily call cap, voice v2, stateless chat | ✅ Done |
 | 7b | Stored chat threads (encrypted at rest, server-side history window, retention pruning) | ✅ Done |
+| 8b | Per-habit and global pauses (consistency, chain, check-ins, intentions) | ✅ Done |
 
 ## Endpoints (current)
 
@@ -26,6 +27,11 @@ GET    /chat/threads/{id}            get thread messages (?limit=&before=)
 PATCH  /chat/threads/{id}            rename chat thread
 DELETE /chat/threads/{id}            delete chat thread
 DELETE /chat/threads                 delete all chat threads
+
+POST   /pauses                       create pause (?habit_id=)
+GET    /pauses                       list pauses (?include_past=&habit_id=)
+POST   /pauses/{id}/end              end running pause today
+DELETE /pauses/{id}                  delete pause
 
 POST   /habits                       create habit
 GET    /habits                       list habits (?include_archived=bool)

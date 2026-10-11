@@ -14,6 +14,7 @@ from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
+from app.repositories.pause_repository import SqlAlchemyPauseRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
 from app.repositories.screen_time_repository import SqlAlchemyScreenTimeRepository
@@ -31,6 +32,7 @@ from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
 from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
+from app.services.pauses_service import PausesService
 from app.services.profile_service import ProfileService
 from app.services.retro_service import RetroService
 from app.services.screen_time_service import ScreenTimeService
@@ -89,6 +91,10 @@ def get_chat_thread_repository(session: AsyncSession = Depends(get_db)) -> SqlAl
     return SqlAlchemyChatThreadRepository(session)
 
 
+def get_pause_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyPauseRepository:
+    return SqlAlchemyPauseRepository(session)
+
+
 
 def get_subject_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemySubjectRepository:
     return SqlAlchemySubjectRepository(session)
@@ -126,8 +132,11 @@ def get_checkins_service(
     screen_repo: SqlAlchemyScreenTimeRepository = Depends(get_screen_time_repository),
     clock: Clock = Depends(get_clock),
     goal_repo: SqlAlchemyGoalRepository = Depends(get_goal_repository),
+    pause_repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
 ) -> CheckinsService:
-    return CheckinsService(habit_repo, checkin_repo, encryptor, sleep_repo, screen_repo, clock, goals=goal_repo)
+    return CheckinsService(
+        habit_repo, checkin_repo, encryptor, sleep_repo, screen_repo, clock, goals=goal_repo, pauses=pause_repo,
+    )
 
 
 def get_sleep_service(
@@ -158,8 +167,9 @@ def get_stats_service(
     profiles: ProfileService = Depends(get_profile_service),
     study_repo: SqlAlchemyStudySessionRepository = Depends(get_study_session_repository),
     urge_repo: SqlAlchemyUrgeRepository = Depends(get_urge_repository),
+    pause_repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
 ) -> StatsService:
-    return StatsService(habit_repo, sleep_repo, screen_repo, profiles, study_repo, urge_repo)
+    return StatsService(habit_repo, sleep_repo, screen_repo, profiles, study_repo, urge_repo, pause_repo)
 
 
 def get_missions_service(
@@ -233,8 +243,18 @@ def get_intentions_service(
     stats: StatsService = Depends(get_stats_service),
     profiles: ProfileService = Depends(get_profile_service),
     clock: Clock = Depends(get_clock),
+    pauses: SqlAlchemyPauseRepository = Depends(get_pause_repository),
 ) -> IntentionsService:
-    return IntentionsService(repo, habits, subjects, stats, profiles, clock)
+    return IntentionsService(repo, habits, subjects, stats, profiles, clock, pauses=pauses)
+
+
+def get_pauses_service(
+    repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+    habits: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+) -> PausesService:
+    return PausesService(repo, profiles, clock, habits)
 
 
 def get_insights_service(

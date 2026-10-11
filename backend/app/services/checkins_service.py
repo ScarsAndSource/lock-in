@@ -88,7 +88,7 @@ class CheckinsService:
     def __init__(
         self, habit_repo: HabitRepository, checkin_repo: CheckinRepository, encryptor: FieldEncryptor,
         sleep_repo: SleepRepository, screen_repo: ScreenTimeRepository, clock: Clock = utc_now,
-        goals: GoalRepository | None = None,
+        goals: GoalRepository | None = None, pauses=None,
     ):
         self._habits = habit_repo
         self._checkins = checkin_repo
@@ -97,6 +97,7 @@ class CheckinsService:
         self._screen = screen_repo
         self._clock = clock
         self._goals = goals
+        self._pauses = pauses
 
     # ------------------------------------------------------------ read
     async def get_view(self, user_id: UUID, target_date: date) -> CheckinView:
@@ -267,15 +268,24 @@ class CheckinsService:
                     )
         return None
 
+    async def _paused_habit_ids(self, user_id: UUID, habits, target_date: date) -> set[UUID]:
+        if self._pauses is None:
+            return set()
+        covering = await self._pauses.list_overlapping(user_id, target_date, target_date)
+        if any(p.habit_id is None for p in covering):
+            return {h.id for h in habits}  # global pause: every habit rests
+        return {p.habit_id for p in covering if p.habit_id is not None}
+
     async def _build_entries(self, user_id: UUID, habits, target_date: date) -> list[CheckinEntry]:
         if not habits:
             return []
+        paused = await self._paused_habit_ids(user_id, habits, target_date)
         # One query for the day's existing logs (was one query per habit).
         existing_logs = {
             log.habit_id: log
             for log in await self._habits.get_logs_in_range(user_id, [h.id for h in habits], target_date, target_date)
         }
-        needing_defaults = [h for h in habits if h.id not in existing_logs]
+        needing_defaults = [h for h in habits if h.id not in existing_logs and h.id not in paused]
         defaults = {}
         if needing_defaults:
             logs_by_habit = await self._habits.get_recent_logs_by_habit(
@@ -290,6 +300,17 @@ class CheckinsService:
                 entries.append(CheckinEntry(
                     habit_id=habit.id, habit_name=habit.name, status=log.status,
                     is_default=log.is_default, is_low_confidence=False, reason="Already logged for this date.",
+                ))
+                continue
+            if habit.id in paused:
+                entries.append(CheckinEntry(
+                    habit_id=habit.id,
+                    habit_name=habit.name,
+                    status=None,
+                    is_default=False,
+                    is_low_confidence=False,
+                    reason="Paused.",
+                    is_scheduled=False,
                 ))
                 continue
             d = defaults[habit.id]

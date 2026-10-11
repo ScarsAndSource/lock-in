@@ -51,7 +51,11 @@ def _pct(numerator: float, denominator: float) -> float | None:
 
 
 def compute_habit_consistency(
-    habit: HabitDefinition, logs: list[HabitLog], end_date: date, window_days: int
+    habit: HabitDefinition,
+    logs: list[HabitLog],
+    end_date: date,
+    window_days: int,
+    paused_days: frozenset[date] = frozenset(),
 ) -> HabitConsistency:
     if window_days < 1:
         raise ValueError("window_days must be >= 1")
@@ -62,14 +66,19 @@ def compute_habit_consistency(
         if l.habit_id == habit.id and not l.is_default and start <= l.log_date <= end_date
     }
     if habit.target_frequency.type == "weekdays":
-        return _weekdays(habit, by_date, start, end_date, window_days)
-    return _n_per_week(habit, by_date, start, end_date, window_days)
+        return _weekdays(habit, by_date, start, end_date, window_days, paused_days)
+    return _n_per_week(habit, by_date, start, end_date, window_days, paused_days)
 
 
-def _weekdays(habit, by_date, start, end_date, window_days) -> HabitConsistency:
+def _weekdays(
+    habit, by_date, start, end_date, window_days, paused_days: frozenset[date] = frozenset()
+) -> HabitConsistency:
     days = [start + timedelta(days=i) for i in range(window_days)]
     scheduled = [d for d in days if d.weekday() in habit.target_frequency.days]
-    evaluated = [d for d in scheduled if not (d == end_date and d not in by_date)]
+    evaluated = [
+        d for d in scheduled
+        if (d not in paused_days or d in by_date) and not (d == end_date and d not in by_date)
+    ]
 
     expected = float(len(evaluated))
     earned = sum(credit(by_date[d].status) for d in evaluated if d in by_date)
@@ -96,9 +105,13 @@ def _weekdays(habit, by_date, start, end_date, window_days) -> HabitConsistency:
     )
 
 
-def _n_per_week(habit, by_date, start, end_date, window_days) -> HabitConsistency:
+def _n_per_week(
+    habit, by_date, start, end_date, window_days, paused_days: frozenset[date] = frozenset()
+) -> HabitConsistency:
     target = habit.target_frequency.count
-    expected = target * window_days / 7
+    days = [start + timedelta(days=i) for i in range(window_days)]
+    active_days = sum(1 for d in days if d not in paused_days or d in by_date)
+    expected = target * active_days / 7
     total_credit = sum(credit(l.status) for l in by_date.values())
     earned = min(total_credit, expected)
 

@@ -48,9 +48,11 @@ class IntentionsService:
     def __init__(
         self, repo: IntentionRepository, habits: HabitRepository, subjects: SubjectRepository,
         stats: StatsService, profiles: ProfileService, clock: Clock = utc_now,
+        pauses=None,
     ):
         self._repo, self._habits, self._subjects = repo, habits, subjects
         self._stats, self._profiles, self._clock = stats, profiles, clock
+        self._pauses = pauses
 
     async def _check_link(self, user_id: UUID, domain: str, entity_id: UUID | None) -> None:
         if domain == "habit":
@@ -111,8 +113,15 @@ class IntentionsService:
 
         habit_plans = [p for p in plans if p.linked_domain == "habit"]
         habits, consistency = {}, {}
+        paused_ids: set[UUID] = set()
         if habit_plans:
             habits = {h.id: h for h in await self._habits.list_active_habits(user_id)}
+            if self._pauses is not None:
+                covering = await self._pauses.list_overlapping(user_id, today, today)
+                paused_ids = (
+                    set(habits) if any(p.habit_id is None for p in covering)
+                    else {p.habit_id for p in covering if p.habit_id is not None}
+                )
             _, items, _ = await self._stats.consistency(user_id, today, 30)
             consistency = {c.habit_id: c for c in items}
 
@@ -124,6 +133,8 @@ class IntentionsService:
             habit = habits.get(plan.linked_entity_id)
             if habit is None:
                 continue  # archived or gone
+            if habit.id in paused_ids:
+                continue
             freq = habit.target_frequency
             if freq.type == "weekdays" and today.weekday() not in freq.days:
                 continue

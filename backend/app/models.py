@@ -272,7 +272,18 @@ class LlmUsageORM(Base):
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+class PauseORM(Base):
+    __tablename__ = "pauses"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    start_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    habit_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("habit_definitions.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class ChatThreadORM(Base):
