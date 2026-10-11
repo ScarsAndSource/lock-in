@@ -1,0 +1,33 @@
+{
+  "name": "Lock'in Weave",
+  "short_name": "Lock'in",
+  "description": "Unified cross-domain continuity, habit discipline, and pattern discovery",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F6F6F2",
+  "theme_color": "#1B1C1A",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Urge Quick-Capture",
+      "short_name": "Urge",
+      "description": "Instant 2-tap resisted or relapsed log",
+      "url": "/?shortcut=urge-quick",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Today's Check-in",
+      "short_name": "Check-in",
+      "description": "Confirm today's cross-domain check-in in 10 seconds",
+      "url": "/?shortcut=checkin",
+      "icons": [{ "src": "/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}
