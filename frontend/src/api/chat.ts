@@ -1,24 +1,21 @@
 import { request, isDemoMode } from './client';
-import { Thread, ThreadDetail, ChatMessage } from '../types';
+import { Thread, ThreadDetail, ChatMessage, SupportPayload } from '../types';
 import { INITIAL_THREADS, INITIAL_CHAT_MESSAGES } from '../store/mockData';
 
 let localThreads = [...INITIAL_THREADS];
-let localMessages: Record<string, ChatMessage[]> = {
+const localMessages: Record<string, ChatMessage[]> = {
   'thread-1': [...INITIAL_CHAT_MESSAGES],
 };
 
 export async function getChatThreads(): Promise<Thread[]> {
   if (isDemoMode()) return localThreads;
-  try {
-    return await request<Thread[]>('/chat/threads');
-  } catch {
-    return localThreads;
-  }
+  return request<Thread[]>('/chat/threads');
 }
 
 export async function getThreadDetail(threadId: string): Promise<ThreadDetail> {
   if (isDemoMode()) {
-    const thread = localThreads.find((t) => t.id === threadId) || localThreads[0];
+    const thread = localThreads.find((t) => t.id === threadId);
+    if (!thread) throw new Error('Thread not found');
     return {
       thread,
       messages: localMessages[threadId] || [],
@@ -29,21 +26,24 @@ export async function getThreadDetail(threadId: string): Promise<ThreadDetail> {
   return request<ThreadDetail>(`/chat/threads/${threadId}`);
 }
 
-export async function sendMessage(message: string, threadId?: string): Promise<{
+export async function sendMessage(
+  message: string,
+  threadId?: string
+): Promise<{
   thread: Thread;
   user_message: ChatMessage;
   reply: ChatMessage;
-  support?: any;
+  support?: SupportPayload | null;
 }> {
   if (isDemoMode()) {
-    let t = localThreads.find((th) => th.id === threadId);
+    let t = threadId ? localThreads.find((th) => th.id === threadId) : undefined;
     if (!t) {
       t = {
         id: `thread-${Date.now()}`,
         title: message.substring(0, 30),
         created_at: new Date().toISOString(),
         last_message_at: new Date().toISOString(),
-        message_count: 2,
+        message_count: 0,
       };
       localThreads.unshift(t);
       localMessages[t.id] = [];
@@ -58,16 +58,16 @@ export async function sendMessage(message: string, threadId?: string): Promise<{
       created_at: new Date().toISOString(),
     };
 
-    // Tone Ceiling: Direct accountability grounded in data
     const botReply: ChatMessage = {
       id: `msg-${Date.now()}-a`,
       role: 'assistant',
-      content: `Your logged logs show you averaged 84.6% consistency this week. The clearest bottleneck is screen time exceeding 2 hours after 11:00 pm, which directly correlates with sluggish morning starts. Misses are just data: you can eliminate this trigger tonight.`,
-      next_step: 'Set phone into charge mode outside bedroom before 11:00 pm.',
+      content:
+        'Your logs show late screen time lining up with weaker mornings. Treat the miss as a data point: the next step is a concrete cutoff, not a pep talk.',
+      next_step: 'Park the phone charging outside the bedroom before 11:00 pm tonight.',
       mode: 'answer',
-      cited_days: ['2026-12-30', '2026-12-31'],
+      cited_days: [],
       narrated: true,
-      model: 'llama-3.3-70b-versatile',
+      model: 'demo',
       created_at: new Date().toISOString(),
     };
 
@@ -84,6 +84,6 @@ export async function sendMessage(message: string, threadId?: string): Promise<{
 
   return request('/chat/messages', {
     method: 'POST',
-    body: JSON.stringify({ message, thread_id: threadId }),
+    body: JSON.stringify({ message, thread_id: threadId || null }),
   });
 }

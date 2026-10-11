@@ -12,11 +12,7 @@ export async function getCheckinDefaults(dateStr: string): Promise<CheckinView> 
   if (isDemoMode()) {
     return { ...currentCheckinView, checkin_date: dateStr };
   }
-  try {
-    return await request<CheckinView>(`/checkins/${dateStr}/defaults`);
-  } catch (e) {
-    return { ...currentCheckinView, checkin_date: dateStr };
-  }
+  return request<CheckinView>(`/checkins/${dateStr}/defaults`);
 }
 
 export async function confirmCheckin(
@@ -25,6 +21,7 @@ export async function confirmCheckin(
 ): Promise<CheckinConfirmResponse> {
   if (isDemoMode()) {
     currentCheckinView.already_confirmed = true;
+    currentCheckinView.checkin_date = dateStr;
     if (payload.overrides) {
       for (const override of payload.overrides) {
         const entry = currentCheckinView.entries.find((e) => e.habit_id === override.habit_id);
@@ -33,6 +30,26 @@ export async function confirmCheckin(
           entry.is_default = false;
         }
       }
+    }
+    if (payload.sleep) {
+      const prev = currentCheckinView.sleep.logged;
+      currentCheckinView.sleep.logged = {
+        log_date: dateStr,
+        time_to_bed: payload.sleep.time_to_bed ?? prev?.time_to_bed ?? null,
+        time_woke: payload.sleep.time_woke ?? prev?.time_woke ?? null,
+        self_rated_quality: payload.sleep.self_rated_quality ?? prev?.self_rated_quality ?? null,
+        duration_minutes: prev?.duration_minutes ?? null,
+        is_default: false,
+      };
+    }
+    if (payload.screen_time) {
+      currentCheckinView.screen_time.logged = {
+        log_date: dateStr,
+        total_minutes: payload.screen_time.total_minutes,
+        source: payload.screen_time.source || 'manual',
+        category_breakdown: payload.screen_time.category_breakdown ?? null,
+        is_default: false,
+      };
     }
     return {
       checkin_date: dateStr,
@@ -51,7 +68,7 @@ export async function confirmCheckin(
 
 export async function getJournal(dateStr: string): Promise<{ checkin_date: string; journal_text: string | null }> {
   if (isDemoMode()) {
-    return { checkin_date: dateStr, journal_text: 'Solid disciplined day. Kept distractions low.' };
+    return { checkin_date: dateStr, journal_text: null };
   }
   return request<{ checkin_date: string; journal_text: string | null }>(`/checkins/${dateStr}/journal`);
 }

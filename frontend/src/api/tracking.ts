@@ -15,13 +15,13 @@ import {
   INITIAL_URGES,
   INITIAL_URGE_SUMMARY,
 } from '../store/mockData';
+import { localTodayISO, qs, rangeDays } from '../lib/dates';
 
 let localSubjects = [...INITIAL_SUBJECTS];
 let localSessions = [...INITIAL_STUDY_SESSIONS];
 let localUrges = [...INITIAL_URGES];
 let localUrgeSummary = { ...INITIAL_URGE_SUMMARY };
 
-// ---------------- Sleep
 export async function logSleep(payload: {
   log_date: string;
   time_to_bed?: string | null;
@@ -34,7 +34,7 @@ export async function logSleep(payload: {
       time_to_bed: payload.time_to_bed || null,
       time_woke: payload.time_woke || null,
       self_rated_quality: payload.self_rated_quality || null,
-      duration_minutes: 450,
+      duration_minutes: null,
       is_default: false,
     };
   }
@@ -44,7 +44,6 @@ export async function logSleep(payload: {
   });
 }
 
-// ---------------- Screen Time
 export async function logScreenTime(payload: {
   log_date: string;
   total_minutes: number;
@@ -66,25 +65,22 @@ export async function logScreenTime(payload: {
       log_date: payload.log_date,
       total_minutes: payload.total_minutes,
       source: payload.source || 'manual',
-      category_breakdown: payload.category_breakdown,
+      category_breakdown: payload.category_breakdown ?? null,
     }),
   });
 }
 
-// ---------------- Study
 export async function getSubjects(): Promise<Subject[]> {
   if (isDemoMode()) {
     return localSubjects.filter((s) => !s.archived_at);
   }
-  try {
-    return await request<Subject[]>('/study/subjects');
-  } catch {
-    return localSubjects.filter((s) => !s.archived_at);
-  }
+  return request<Subject[]>('/study/subjects');
 }
 
 export async function createSubject(name: string): Promise<Subject> {
   if (isDemoMode()) {
+    const existing = localSubjects.find((s) => s.name.toLowerCase() === name.toLowerCase() && !s.archived_at);
+    if (existing) return existing;
     const s: Subject = { id: `subj-${Date.now()}`, name, archived_at: null };
     localSubjects.push(s);
     return s;
@@ -98,13 +94,7 @@ export async function createSubject(name: string): Promise<Subject> {
 export async function bulkCreateSubjects(text: string): Promise<Subject[]> {
   if (isDemoMode()) {
     const names = text.split(',').map((s) => s.trim()).filter(Boolean);
-    const created: Subject[] = names.map((name) => ({
-      id: `subj-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      name,
-      archived_at: null,
-    }));
-    localSubjects.push(...created);
-    return created;
+    return Promise.all(names.map((name) => createSubject(name)));
   }
   return request<Subject[]>('/study/subjects/bulk', {
     method: 'POST',
@@ -120,7 +110,8 @@ export async function logStudySession(payload: {
   actual_minutes: number;
 }): Promise<StudySession> {
   if (isDemoMode()) {
-    const subjectName = payload.subject_name || localSubjects.find((s) => s.id === payload.subject_id)?.name || 'Study';
+    const subjectName =
+      payload.subject_name || localSubjects.find((s) => s.id === payload.subject_id)?.name || 'Study';
     const s: StudySession = {
       id: `sess-${Date.now()}`,
       log_date: payload.log_date,
@@ -132,44 +123,53 @@ export async function logStudySession(payload: {
     localSessions.unshift(s);
     return s;
   }
+  const body: Record<string, unknown> = {
+    log_date: payload.log_date,
+    actual_minutes: payload.actual_minutes,
+    planned_minutes: payload.planned_minutes ?? null,
+  };
+  if (payload.subject_id) body.subject_id = payload.subject_id;
+  else if (payload.subject_name) body.subject_name = payload.subject_name;
   return request<StudySession>('/study/sessions', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
 }
 
-export async function getStudySessions(): Promise<StudySession[]> {
-  if (isDemoMode()) return localSessions;
-  try {
-    return await request<StudySession[]>('/study/sessions');
-  } catch {
-    return localSessions;
+export async function getStudySessions(endDate: string, windowDays = 30): Promise<StudySession[]> {
+  const { start, end } = rangeDays(endDate, windowDays);
+  if (isDemoMode()) {
+    return localSessions.filter((s) => s.log_date >= start && s.log_date <= end);
   }
+  return request<StudySession[]>(`/study/sessions${qs({ start_date: start, end_date: end })}`);
 }
 
-export async function getStudySummary(): Promise<StudySummary> {
+export async function getStudySummary(endDate: string, windowDays = 30): Promise<StudySummary> {
+  const { start, end } = rangeDays(endDate, windowDays);
   if (isDemoMode()) {
-    const bySubj = localSubjects.map((s) => {
-      const minutes = localSessions
-        .filter((sess) => sess.subject_id === s.id || sess.subject_name === s.name)
+    const sessions = localSessions.filter((s) => s.log_date >= start && s.log_date <= end);
+    const bySubj = localSubjects.map((subj) => {
+      const minutes = sessions
+        .filter((sess) => sess.subject_id === subj.id)
         .reduce((sum, curr) => sum + curr.actual_minutes, 0);
-      return { subject_id: s.id, name: s.name, minutes };
+      return { subject_id: subj.id, name: subj.name, minutes };
     });
-    const totalActual = bySubj.reduce((sum, s) => sum + s.minutes, 0);
+    const totalActual = sessions.reduce((sum, s) => sum + s.actual_minutes, 0);
+    const totalPlanned = sessions.reduce((sum, s) => sum + (s.planned_minutes || 0), 0);
+    const daysStudied = new Set(sessions.map((s) => s.log_date)).size;
     return {
-      start_date: '2026-12-01',
-      end_date: '2026-12-31',
+      start_date: start,
+      end_date: end,
       total_actual: totalActual,
-      total_planned: totalActual + 30,
-      follow_through_pct: 92.5,
-      days_studied: 18,
+      total_planned: totalPlanned,
+      follow_through_pct: totalPlanned > 0 ? Math.round((totalActual / totalPlanned) * 1000) / 10 : null,
+      days_studied: daysStudied,
       by_subject: bySubj,
     };
   }
-  return request<StudySummary>('/study/summary');
+  return request<StudySummary>(`/study/summary${qs({ start_date: start, end_date: end })}`);
 }
 
-// ---------------- Urges
 export async function captureUrge(payload: {
   outcome: UrgeOutcome;
   occurred_at?: string;
@@ -179,12 +179,13 @@ export async function captureUrge(payload: {
   note?: string | null;
 }): Promise<UrgeLog> {
   if (isDemoMode()) {
+    const today = localTodayISO();
     const newUrge: UrgeLog = {
       id: `urge-${Date.now()}`,
       occurred_at: payload.occurred_at || new Date().toISOString(),
-      log_date: new Date().toISOString().split('T')[0],
+      log_date: today,
       outcome: payload.outcome,
-      intensity: payload.intensity || null,
+      intensity: payload.intensity ?? null,
       has_detail: Boolean(payload.trigger_context || payload.coping_strategy || payload.note),
       trigger_context: payload.trigger_context || null,
       coping_strategy: payload.coping_strategy || null,
@@ -197,7 +198,10 @@ export async function captureUrge(payload: {
       localUrgeSummary.relapsed += 1;
     }
     localUrgeSummary.total += 1;
-    localUrgeSummary.resist_rate_pct = Math.round((localUrgeSummary.resisted / localUrgeSummary.total) * 100);
+    localUrgeSummary.resist_rate_pct =
+      localUrgeSummary.total > 0
+        ? Math.round((localUrgeSummary.resisted / localUrgeSummary.total) * 1000) / 10
+        : null;
     return newUrge;
   }
   return request<UrgeLog>('/urges', {
@@ -206,20 +210,15 @@ export async function captureUrge(payload: {
   });
 }
 
-export async function getUrges(): Promise<UrgeLog[]> {
-  if (isDemoMode()) return localUrges;
-  try {
-    return await request<UrgeLog[]>('/urges');
-  } catch {
-    return localUrges;
+export async function getUrges(endDate: string, windowDays = 14, details = true): Promise<UrgeLog[]> {
+  const { start, end } = rangeDays(endDate, windowDays);
+  if (isDemoMode()) {
+    return localUrges.filter((u) => u.log_date >= start && u.log_date <= end);
   }
+  return request<UrgeLog[]>(`/urges${qs({ start_date: start, end_date: end, details })}`);
 }
 
-export async function getUrgeSummary(): Promise<UrgeSummary> {
-  if (isDemoMode()) return localUrgeSummary;
-  try {
-    return await request<UrgeSummary>('/urges/summary');
-  } catch {
-    return localUrgeSummary;
-  }
+export async function getUrgeSummary(windowDays = 14): Promise<UrgeSummary> {
+  if (isDemoMode()) return { ...localUrgeSummary, window_days: windowDays };
+  return request<UrgeSummary>(`/urges/summary${qs({ days: windowDays })}`);
 }

@@ -9,11 +9,7 @@ export async function getHabits(): Promise<Habit[]> {
   if (isDemoMode()) {
     return localHabits.filter((h) => !h.archived_at);
   }
-  try {
-    return await request<Habit[]>('/habits');
-  } catch (e) {
-    return localHabits.filter((h) => !h.archived_at);
-  }
+  return request<Habit[]>('/habits');
 }
 
 export async function createHabit(name: string, target_frequency: TargetFrequency): Promise<Habit> {
