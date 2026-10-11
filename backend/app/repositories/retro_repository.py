@@ -18,6 +18,20 @@ class RetroRepository(Protocol):
     async def latest(self, user_id: UUID) -> WeeklyRetro | None: ...
     async def list(self, user_id: UUID, limit: int) -> list[WeeklyRetro]: ...
     async def mark_completed(self, user_id: UUID, retro_id: UUID, now: datetime) -> WeeklyRetro | None: ...
+    async def update_narration(
+        self,
+        user_id: UUID,
+        retro_id: UUID,
+        *,
+        narrative: str,
+        next_step: str,
+        summary: dict,
+        evidence_refs: dict,
+        narrated: bool,
+        voice_version: str,
+        model: str | None,
+        now: datetime,
+    ) -> WeeklyRetro | None: ...
 
 
 def _to_domain(row: WeeklyRetroORM) -> WeeklyRetro:
@@ -77,6 +91,33 @@ class SqlAlchemyRetroRepository:
         if row is None:
             return None
         row.completed_at = now
+        row.updated_at = now
+        await self._session.flush()
+        return _to_domain(row)
+
+    async def update_narration(
+        self,
+        user_id: UUID,
+        retro_id: UUID,
+        *,
+        narrative: str,
+        next_step: str,
+        summary: dict,
+        evidence_refs: dict,
+        narrated: bool,
+        voice_version: str,
+        model: str | None,
+        now: datetime,
+    ) -> WeeklyRetro | None:
+        stmt = select(WeeklyRetroORM).where(
+            WeeklyRetroORM.id == retro_id, WeeklyRetroORM.user_id == user_id
+        )
+        row = (await self._session.execute(stmt)).scalar_one_or_none()
+        if row is None:
+            return None
+        row.narrative, row.next_step = narrative, next_step
+        row.summary, row.evidence_refs = summary, evidence_refs
+        row.narrated, row.voice_version, row.model = narrated, voice_version, model
         row.updated_at = now
         await self._session.flush()
         return _to_domain(row)

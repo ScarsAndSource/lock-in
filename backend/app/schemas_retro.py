@@ -11,6 +11,17 @@ from app.schemas_ai import InsightOut, RefreshOut
 
 class RetroGenerateRequest(BaseModel):
     week_start: date | None = None   # a Monday; omitted = the most recent completed week
+    mode: Literal["auto", "rough", "normal"] = "auto"
+
+
+class RetroToneRequest(BaseModel):
+    mode: Literal["auto", "rough", "normal"]
+
+
+class WeekModeOut(BaseModel):
+    mode: Literal["normal", "rough"]
+    reasons: list[str]
+    source: Literal["auto", "user"]
 
 
 class RetroOut(BaseModel):
@@ -24,6 +35,7 @@ class RetroOut(BaseModel):
     evidence_refs: dict
     narrated: bool
     completed_at: datetime | None
+    week_mode: WeekModeOut | None = None  # None for retros generated before this feature
 
 
 class RetroDetailOut(RetroOut):
@@ -34,3 +46,4 @@ class RetroDetailOut(RetroOut):
 class RetroCompleteOut(BaseModel):
     retro: RetroOut
     insights: RefreshOut
+

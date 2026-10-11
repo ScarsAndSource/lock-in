@@ -64,6 +64,7 @@ def _validate(
     max_step: int = 200,
     check_numbers: bool = False,
     allowed_days: set[str] | None = None,
+    extra_banned: re.Pattern[str] | None = None,
 ) -> NarrationResult | None:
     """Parse and validate the LLM JSON response. Returns None on any failure."""
     data = _load_json(raw)
@@ -79,6 +80,8 @@ def _validate(
     if len(obs) > max_observation or len(step) > max_step:
         return None
     if not tone_ok(obs, step):
+        return None
+    if extra_banned is not None and extra_banned.search(f"{obs} {step}".replace("\u2019", "'")):
         return None
     if require_dates and not cited:
         return None
@@ -112,6 +115,7 @@ async def narrate_structured(
     max_step: int = 200,
     check_numbers: bool = False,
     allowed_days: set[str] | None = None,
+    extra_banned: re.Pattern[str] | None = None,
 ) -> tuple[NarrationResult | None, str]:
     """(result, raw_response). LLMError propagates (callers fall back). None result = failed validation."""
     last_raw = ""
@@ -127,6 +131,7 @@ async def narrate_structured(
             max_step=max_step,
             check_numbers=check_numbers,
             allowed_days=allowed_days,
+            extra_banned=extra_banned,
         )
         if result is not None:
             return result, raw

@@ -197,6 +197,27 @@ class InMemoryRetroRepository:
         r.completed_at = now
         return r
 
+    async def update_narration(
+        self,
+        user_id,
+        retro_id,
+        *,
+        narrative,
+        next_step,
+        summary,
+        evidence_refs,
+        narrated,
+        voice_version,
+        model,
+        now,
+    ):
+        r = self._retros.get(retro_id)
+        if r is None or r.user_id != user_id:
+            return None
+        r.narrative, r.next_step, r.summary, r.evidence_refs = narrative, next_step, summary, evidence_refs
+        r.narrated, r.voice_version, r.model = narrated, voice_version, model
+        return r
+
 
 class InMemoryAccountRepository:
     """Reads/deletes straight out of the other fakes' private stores (test-only)."""

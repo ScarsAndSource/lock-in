@@ -13,7 +13,6 @@ skips with rate_previous_first when 3+ insights older than 7 days are still unra
 """
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from uuid import UUID, uuid4
 
@@ -22,15 +21,16 @@ from app.domain import PatternInsight, WeeklyRetro
 from app.exceptions import NotFoundError, ValidationError
 from app.repositories.retro_repository import RetroRepository
 from app.services.insights_service import InsightsService, RefreshResult
-from app.services.llm import LLMClient, LLMError
+from app.services.llm import LLMClient
 from app.services.missions_service import MissionsService
-from app.services.narration import narrate_structured, sanitize_user_text
+from app.services.narration import sanitize_user_text
 from app.services.profile_service import ProfileService
-from app.services.retro_engine import build_summary, fallback_narrative, week_bounds
+from app.services.retro_engine import build_summary, week_bounds
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
 from app.services.urges_service import UrgesService
-from app.voice_config import VOICE_VERSION, retro_system_prompt
+from app.services.week_mode import fallback_for_mode, narrate_retro, resolve_week_mode
+from app.voice_config import VOICE_VERSION
 
 
 class RetroService:
@@ -56,8 +56,9 @@ class RetroService:
         self._llm = llm
         self._clock = clock
 
-    async def generate(self, user_id: UUID, week_start: date | None) -> tuple[WeeklyRetro, bool]:
-        """(retro, created). Idempotent: an existing retro for that week is returned untouched."""
+    async def generate(self, user_id: UUID, week_start: date | None, mode: str = "auto") -> tuple[WeeklyRetro, bool]:
+        """(retro, created). Idempotent: an existing retro for that week is returned untouched.
+        mode: auto (deterministic rough-week detection) | rough | normal (the user's explicit ask)."""
         today = await self._profiles.today(user_id)
         try:
             start, end = week_bounds(today, week_start)
@@ -69,24 +70,12 @@ class RetroService:
             return existing, False
 
         summary = await self._gather(user_id, start, end)
-        narration = await self._narrate(summary)
-        if narration is not None:
-            text, step, cited, narrated, model = (
-                narration.observation, narration.next_step, narration.cited_days, True, self._llm.model,
-            )
-        else:
-            text, step, cited = fallback_narrative(summary)
-            narrated, model = False, None
-
+        summary["week_mode"] = resolve_week_mode(summary, mode).as_dict()
+        text, step, cited, narrated, model = await self._text_for(summary)
         retro = WeeklyRetro(
             id=uuid4(), user_id=user_id, week_start=start, week_end=end, generated_at=self._clock(),
             narrative=text, next_step=step, summary=summary,
-            evidence_refs={
-                "cited_days": cited,
-                "chain_dates": [c["slip_date"] for c in summary["chains"]],
-                "unexplained_dates": [u["date"] for u in summary["unexplained_slips"]],
-                "clean_days": [c["date"] for c in summary["clean_days"]],
-            },
+            evidence_refs=_evidence(summary, cited),
             narrated=narrated, voice_version=VOICE_VERSION, model=model,
         )
         saved = await self._repo.create(retro)
@@ -119,7 +108,37 @@ class RetroService:
         refresh = await self._insights.refresh(user_id)  # ratings are in; new insights respect them
         return done or retro, refresh
 
+    async def retone(self, user_id: UUID, week_start: date, requested: str) -> tuple[WeeklyRetro, bool]:
+        """(retro, changed). Re-read a finished week in another tone: same facts, new narration.
+        'auto' hands the decision back to the deterministic detector."""
+        retro = await self.get(user_id, week_start)
+        summary = dict(retro.summary)
+        current = summary.get("week_mode") or {}
+        new_mode = resolve_week_mode(summary, requested)
+        if current.get("mode") == new_mode.mode and current.get("source") == new_mode.source:
+            return retro, False  # nothing to change: no model call, no cost
+        summary["week_mode"] = new_mode.as_dict()
+        text, step, cited, narrated, model = await self._text_for(summary)
+        updated = await self._repo.update_narration(
+            user_id, retro.id,
+            narrative=text, next_step=step, summary=summary,
+            evidence_refs=_evidence(summary, cited),
+            narrated=narrated, voice_version=VOICE_VERSION, model=model,
+            now=self._clock(),
+        )
+        return updated or retro, True
+
     # ------------------------------------------------------------------
+    async def _text_for(self, summary: dict) -> tuple[str, str, list[str], bool, str | None]:
+        narration = await self._narrate(summary)
+        if narration is not None:
+            return narration.observation, narration.next_step, narration.cited_days, True, self._llm.model
+        text, step, cited = fallback_for_mode(summary)
+        return text, step, cited, False, None
+
+    async def _narrate(self, summary: dict):
+        return await narrate_retro(self._llm, summary)
+
     async def _gather(self, user_id: UUID, start: date, end: date) -> dict:
         prev_end = start - timedelta(days=1)
         _, days8 = await self._stats.chain(user_id, end, 8)
@@ -149,18 +168,12 @@ class RetroService:
             label=lambda text: sanitize_user_text(text, 40, single_line=True),
         )
 
-    async def _narrate(self, summary: dict):
-        facts_json = json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
-        require_dates = bool(summary["chains"] or summary["unexplained_slips"] or summary["clean_days"])
-        messages = [
-            {"role": "system", "content": retro_system_prompt()},
-            {"role": "user", "content": f"<facts>\n{facts_json}\n</facts>"},
-        ]
-        try:
-            narration, _ = await narrate_structured(
-                self._llm, messages, facts_json=facts_json, require_dates=require_dates,
-                max_observation=450, max_tokens=450, temperature=0.3,
-            )
-        except LLMError:
-            return None
-        return narration
+
+def _evidence(summary: dict, cited: list[str]) -> dict:
+    return {
+        "cited_days": cited,
+        "chain_dates": [c["slip_date"] for c in summary["chains"]],
+        "unexplained_dates": [u["date"] for u in summary["unexplained_slips"]],
+        "clean_days": [c["date"] for c in summary["clean_days"]],
+    }
+

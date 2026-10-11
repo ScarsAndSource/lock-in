@@ -10,7 +10,7 @@ from app.domain import WeeklyRetro
 from app.ratelimit import rate_limit
 from app.routers.insights import insight_out
 from app.schemas_ai import RefreshOut
-from app.schemas_retro import RetroCompleteOut, RetroDetailOut, RetroGenerateRequest, RetroOut
+from app.schemas_retro import RetroCompleteOut, RetroDetailOut, RetroGenerateRequest, RetroOut, RetroToneRequest, WeekModeOut
 from app.security import get_current_user_id
 from app.services.retro_service import RetroService
 
@@ -18,10 +18,12 @@ router = APIRouter(prefix="/retros", tags=["retros"], dependencies=[Depends(rate
 
 
 def _retro_out(r: WeeklyRetro) -> RetroOut:
+    wm = r.summary.get("week_mode") if r.summary else None
     return RetroOut(
         id=r.id, week_start=r.week_start, week_end=r.week_end, generated_at=r.generated_at,
         narrative=r.narrative, next_step=r.next_step, summary=r.summary,
         evidence_refs=r.evidence_refs, narrated=r.narrated, completed_at=r.completed_at,
+        week_mode=WeekModeOut(**wm) if isinstance(wm, dict) else None,
     )
 
 
@@ -62,7 +64,11 @@ async def generate_retro(
     service: RetroService = Depends(get_retro_service),
 ) -> RetroDetailOut:
     """Idempotent. 201 = generated now, 200 = that week's retro already existed. Completed weeks only."""
-    retro, created = await service.generate(user_id, body.week_start if body else None)
+    retro, created = await service.generate(
+        user_id,
+        body.week_start if body else None,
+        body.mode if body else "auto",
+    )
     if not created:
         response.status_code = status.HTTP_200_OK
     return await _detail(service, user_id, retro)
@@ -77,6 +83,19 @@ async def get_retro(
     return await _detail(service, user_id, await service.get(user_id, week_start))
 
 
+@router.post("/{week_start}/tone", response_model=RetroDetailOut)
+async def retone_retro(
+    week_start: date,
+    body: RetroToneRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    service: RetroService = Depends(get_retro_service),
+) -> RetroDetailOut:
+    """Re-read this week as rough / normal / auto. Same facts, new narration.
+    Counts toward the daily AI cap; a no-op (no model call) when the read wouldn't change."""
+    retro, _ = await service.retone(user_id, week_start, body.mode)
+    return await _detail(service, user_id, retro)
+
+
 @router.post("/{week_start}/complete", response_model=RetroCompleteOut)
 async def complete_retro(
     week_start: date,
@@ -89,3 +108,4 @@ async def complete_retro(
         retro=_retro_out(retro),
         insights=RefreshOut(generated=[insight_out(i) for i in refresh.created], skipped_reason=refresh.skipped_reason),
     )
+
