@@ -8,7 +8,7 @@ export type UrgeOutcome = 'resisted' | 'relapsed';
 
 export type GoalStatus = 'active' | 'archived';
 
-export type MissionStatus = 'upcoming' | 'running' | 'completed' | 'abandoned';
+export type MissionStatus = 'active' | 'completed' | 'ended_early';
 
 export type WeekMode = 'auto' | 'rough' | 'normal';
 
@@ -223,11 +223,16 @@ export interface ConsistencyOut {
 
 export type ChainDomainStatus = 'good' | 'partial' | 'missed' | 'none';
 
+/** Raw backend values: good | ok | bad | none (mapped to ChainDomainStatus in the UI). */
+export type ChainBackendStatus = 'good' | 'ok' | 'bad' | 'none' | ChainDomainStatus;
+
 export interface ChainDay {
   day: string;
-  habits: ChainDomainStatus;
-  sleep: ChainDomainStatus;
-  screen_time: ChainDomainStatus;
+  habits: ChainBackendStatus;
+  sleep: ChainBackendStatus;
+  screen_time: ChainBackendStatus;
+  study?: ChainBackendStatus;
+  urges?: ChainBackendStatus;
   habit_ratio: number | null;
   sleep_minutes: number | null;
   screen_minutes: number | null;
