@@ -20,6 +20,7 @@ never resets to zero on a miss. Full reasoning and data model: [SPEC.md](./SPEC.
 | 7. Groq pattern insights + check-in chat (crisis fallback required) | **Done** — `backend/` & `frontend/` |
 | 8. Weekly retrospective + insight feedback loop | **Done** — `backend/` & `frontend/` |
 | 9. Chain visualization | **Done** — `backend/` & `frontend/` |
+| 11. AI to-do list + reminders + nudges (free-text capture, cadence chores, web push) | **Done** — `backend/` & `frontend/` |
 | 10. Phase 2: Chrome extension for real screen time | Post-v1 |
 
 ## Structure

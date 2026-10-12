@@ -15,6 +15,7 @@
 | 7 | Groq LLM layer, crisis safety net, daily call cap, voice v2, stateless chat | ✅ Done |
 | 7b | Stored chat threads (encrypted at rest, server-side history window, retention pruning) | ✅ Done |
 | 8b | Per-habit and global pauses (consistency, chain, check-ins, intentions) | ✅ Done |
+| 11 | Tasks: AI free-text capture, cadence chores, reminders, backoff nudges, web push | ✅ Done |
 
 ## Endpoints (current)
 
@@ -27,6 +28,22 @@ GET    /chat/threads/{id}            get thread messages (?limit=&before=)
 PATCH  /chat/threads/{id}            rename chat thread
 DELETE /chat/threads/{id}            delete chat thread
 DELETE /chat/threads                 delete all chat threads
+
+POST   /tasks/capture                free text -> structured tasks (AI; falls back to your own words)
+GET    /tasks/focus                  Now / Small things / Later today / Stopped nudging
+POST   /tasks                        create a task by hand
+GET    /tasks                        list tasks (?status=open|done|dropped)
+PATCH  /tasks/{id}                   edit (title, notes, importance, due, remind, repeat_days, status)
+POST   /tasks/{id}/done              complete (cadence tasks come due again N days from now)
+POST   /tasks/{id}/snooze            snooze 5 min .. 7 days
+DELETE /tasks/{id}                   delete
+
+GET    /notifications/vapid-key      public push key (null = push not configured)
+GET    /notifications/prefs          quiet hours, digest hour, daily cap, device count
+PATCH  /notifications/prefs          update them
+PUT    /notifications/subscription   register this browser for push
+DELETE /notifications/subscription   unregister it
+POST   /notifications/test           send a test push to your devices
 
 POST   /pauses                       create pause (?habit_id=)
 GET    /pauses                       list pauses (?include_past=&habit_id=)
@@ -183,6 +200,11 @@ migrations/005_urges.sql
 migrations/006_goals_and_intentions.sql
 migrations/007_weekly_retros.sql
 migrations/008_pattern_insights.sql
+migrations/009_llm_usage.sql
+migrations/010_pauses.sql
+migrations/011_chat_threads.sql
+migrations/012_pauses_per_habit.sql
+migrations/013_tasks_and_nudges.sql
 ```
 
 ```bash
@@ -196,6 +218,7 @@ Visit `http://localhost:8000/docs` for interactive API docs.
 | Job | Schedule | Command |
 |-----|----------|---------|
 | Generate weekly retros | Daily | `python -m app.jobs.generate_retros` |
+| Send task nudges (web push) | Every 5 minutes | `python -m app.jobs.send_nudges` |
 
 Daily rather than weekly because users in different timezones finish their Sunday
 at different times. Generation is idempotent — one retro per user per week.
@@ -223,3 +246,55 @@ Tests use fully in-memory fakes — no database or network required. All 136 tes
 - **LLM narration** (`narrated: true`) requires a wired Groq key (later slice).
   Without it, retros fall back to deterministic chain text (`narrated: false`),
   which is the safe and honest outcome.
+
+## Slice 11 — tasks, reminders, nudges
+
+### What a task is (and what the code does NOT know)
+One `tasks` table covers deadlines ("lab report friday 5pm"), exact reminders ("remind me at 6pm") and cadence
+chores ("call nani every few days", "laundry"). There is no list of family members, chores or categories anywhere in
+code. The capture step reads the person's own sentence and fills three generic knobs: `importance` (1 small, 2 normal,
+3 real deadline), when (`due` / `remind`), and `repeat_days`. A cadence chore is just a task with `repeat_days` set;
+completing it schedules the next one N days from **completion**, so being late never makes tasks pile up.
+
+### Capture pipeline (same trust model as chat/retros)
+```
+crisis screen on raw text ──► support payload, nothing stored, no model call
+        ↓
+LLM extracts JSON ──► validated in code (title/length caps, importance 1..3, repeat 1..365,
+        │               due/remind through the same strict local-time parser as the API,
+        │               past reminders dropped, max 12 tasks, duplicates of open tasks skipped)
+        ↓
+model down / over budget / junk twice ──► your words kept as plain tasks, mode="fallback"
+```
+The capture counts against the same per-user daily AI cap (feature label `tasks`; migration 013 widens the
+`llm_usage` check constraint — without it every capture would fail on cap bookkeeping).
+
+### Nudge policy (`services/nudge_policy.py`, pure and fully tested)
+- A task is only nudged once its **trigger** passes: exact reminder, else due time, else (date-only) the person's
+  nudge hour that day. No trigger = backlog = never pushed.
+- Nudges **back off, never escalate**: gap = base × 2^(nudges sent) (base 2h / 6h / 24h by importance), and after
+  5 / 3 / 2 nudges pushing stops. The task shows under "Stopped nudging" in the app for a decision.
+- Small things (importance 1) never ping individually: one **digest** at the nudge hour. Only an exact reminder fires alone.
+- Quiet hours always win. A global pause silences everything except the first fire of an exact reminder.
+- Daily cap per user; only a push that reached a device counts and advances backoff, so failures just retry.
+- More than 3 pushes due at once: the extras collapse into one digest.
+
+### Web push setup
+```bash
+pip install -r requirements.txt
+python -m app.jobs.gen_vapid        # prints VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY -> put both in env
+# also set VAPID_SUBJECT=mailto:you@example.com
+```
+Add a Render Cron Job running `python -m app.jobs.send_nudges` every 5 minutes (same env vars as the API).
+Without VAPID keys the app works fine: the task list and focus view just never push.
+
+Security notes: a subscription endpoint is a URL **this server POSTs to**, so `PUT /notifications/subscription` only
+accepts https endpoints on known push services (`PUSH_ALLOWED_HOST_SUFFIXES`, SSRF guard). Payloads and keys are never logged.
+
+### Known limits
+- Rate limiting is still in-memory/per-process (see above).
+- Notification tap opens the app; there are no Done/Snooze buttons on the notification itself (the service worker
+  has no access to the auth token). Possible next step.
+- A browser shared between two accounts keeps one push endpoint: the second account gets a clear 409 until the
+  first turns notifications off.
+- Migration 013 and the nudge job have not been run against a live Postgres/Supabase
