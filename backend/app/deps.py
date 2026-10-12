@@ -14,12 +14,14 @@ from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
+from app.repositories.notification_repository import SqlAlchemyNotificationRepository
 from app.repositories.pause_repository import SqlAlchemyPauseRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
 from app.repositories.screen_time_repository import SqlAlchemyScreenTimeRepository
 from app.repositories.sleep_repository import SqlAlchemySleepRepository
 from app.repositories.study_repository import SqlAlchemyStudySessionRepository, SqlAlchemySubjectRepository
+from app.repositories.task_repository import SqlAlchemyTaskRepository
 from app.repositories.urge_repository import SqlAlchemyUrgeRepository
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor
 from app.services.account_service import AccountService
@@ -32,14 +34,17 @@ from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
 from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
+from app.services.notifications_service import NotificationsService
 from app.services.pauses_service import PausesService
 from app.services.pause_shortcuts_service import PauseShortcutsService
 from app.services.profile_service import ProfileService
+from app.services.push import PushSender, WebPushSender
 from app.services.retro_service import RetroService
 from app.services.screen_time_service import ScreenTimeService
 from app.services.sleep_service import SleepService
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
+from app.services.tasks_service import TasksService
 from app.services.urges_service import UrgesService
 
 
@@ -313,3 +318,39 @@ def get_pause_shortcuts_service(
     clock: Clock = Depends(get_clock),
 ) -> PauseShortcutsService:
     return PauseShortcutsService(pauses, repo, habits, profiles, clock)
+
+
+# ---- tasks, reminders, nudges, push (slice 11)
+def get_task_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyTaskRepository:
+    return SqlAlchemyTaskRepository(session)
+
+
+def get_notification_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyNotificationRepository:
+    return SqlAlchemyNotificationRepository(session)
+
+
+def get_push_sender(settings: Settings = Depends(get_settings)) -> PushSender:
+    """With no VAPID keys the sender reports configured=False: the app works, nothing is pushed."""
+    return WebPushSender(settings.vapid_private_key, settings.vapid_subject)
+
+
+def get_tasks_service(
+    repo: SqlAlchemyTaskRepository = Depends(get_task_repository),
+    notif: SqlAlchemyNotificationRepository = Depends(get_notification_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    llm: LLMClient = Depends(get_llm_client),
+    clock: Clock = Depends(get_clock),
+) -> TasksService:
+    return TasksService(repo, notif, profiles, scoped(llm, "tasks"), clock)
+
+
+def get_notifications_service(
+    repo: SqlAlchemyNotificationRepository = Depends(get_notification_repository),
+    tasks: SqlAlchemyTaskRepository = Depends(get_task_repository),
+    pauses: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    sender: PushSender = Depends(get_push_sender),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+) -> NotificationsService:
+    return NotificationsService(repo, tasks, pauses, profiles, sender, settings.push_allowed_host_suffixes, clock)

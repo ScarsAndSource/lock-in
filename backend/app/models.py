@@ -10,7 +10,7 @@ from datetime import datetime
 from datetime import time as time_
 
 from sqlalchemy import (
-    CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, LargeBinary,
     SmallInteger, Text, Time, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
@@ -262,7 +262,7 @@ class LlmUsageORM(Base):
     __tablename__ = "llm_usage"
     __table_args__ = (
         UniqueConstraint("user_id", "usage_date", "feature", name="llm_usage_user_day_feature"),
-        CheckConstraint("feature in ('chat', 'retro', 'insight')", name="llm_usage_feature_check"),
+        CheckConstraint("feature in ('chat', 'retro', 'insight', 'tasks')", name="llm_usage_feature_check"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -283,6 +283,61 @@ class PauseORM(Base):
         PGUUID(as_uuid=True), ForeignKey("habit_definitions.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TaskORM(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    importance: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    due_has_time: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    remind_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    repeat_days: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    nudge_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    last_nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    done_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_parsed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationPrefsORM(Base):
+    __tablename__ = "notification_prefs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), primary_key=True
+    )
+    push_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    quiet_start: Mapped[time_] = mapped_column(Time, nullable=False)
+    quiet_end: Mapped[time_] = mapped_column(Time, nullable=False)
+    nudge_hour: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=18)
+    max_per_day: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=4)
+    pushes_sent_day: Mapped[date_ | None] = mapped_column(Date, nullable=True)
+    pushes_sent: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PushSubscriptionORM(Base):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("endpoint", name="push_subscriptions_endpoint_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    p256dh: Mapped[str] = mapped_column(Text, nullable=False)
+    auth: Mapped[str] = mapped_column(Text, nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fail_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
