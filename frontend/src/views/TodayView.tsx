@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import { SevenDayWeave } from '../components/SevenDayWeave';
 import { TodayEntries } from '../components/TodayEntries';
+import { TasksCard } from '../components/TasksCard';
 import { clockLabel, formatDayHeading } from '../lib/dates';
 
 export const TodayView: React.FC = () => {
@@ -45,6 +46,8 @@ export const TodayView: React.FC = () => {
           <span className="material-symbols-outlined text-ink text-[20px]">arrow_forward</span>
         </button>
       </section>
+
+      <TasksCard />
 
       <SevenDayWeave />
 

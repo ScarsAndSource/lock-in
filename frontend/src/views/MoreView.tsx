@@ -12,6 +12,7 @@ import {
 } from '../api/profile';
 import { Profile, Intention, MissionDetail, Domain } from '../types';
 import { errorMessage } from '../lib/format';
+import { NotificationSettings } from '../components/NotificationSettings';
 
 export const MoreView: React.FC = () => {
   const { demoMode, toggleDemoMode, token, saveToken, showToast } = useApp();
@@ -285,6 +286,8 @@ export const MoreView: React.FC = () => {
           </button>
         </form>
       </section>
+
+      <NotificationSettings />
 
       {/* Privacy, Export, and Delete */}
       <section className="bg-surface rounded-xl p-4 border border-line shadow-sm space-y-3">

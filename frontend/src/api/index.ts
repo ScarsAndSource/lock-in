@@ -7,3 +7,5 @@ export * from './retros';
 export * from './chat';
 export * from './pauses';
 export * from './profile';
+export * from './tasks';
+export * from './notifications';

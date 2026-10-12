@@ -430,3 +430,51 @@ export interface Profile {
   tone_preference: string;
   today: string;
 }
+
+// ---------------------------------------------------------------- tasks, reminders, nudges
+export type TaskState = 'backlog' | 'upcoming' | 'due' | 'stale' | 'snoozed' | 'done' | 'dropped';
+
+export interface Task {
+  id: string;
+  title: string;
+  notes: string | null;
+  importance: 1 | 2 | 3; // 1 small chore, 2 normal, 3 real deadline
+  status: 'open' | 'done' | 'dropped';
+  state: TaskState;
+  due: string | null; // local "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM"
+  due_has_time: boolean;
+  remind: string | null; // local "YYYY-MM-DDTHH:MM"
+  repeat_days: number | null;
+  snoozed_until: string | null;
+  nudge_count: number;
+  last_done_at: string | null;
+  done_count: number;
+  ai_parsed: boolean;
+  created_at: string;
+}
+
+export interface TaskCaptureResult {
+  mode: 'parsed' | 'fallback' | 'support';
+  tasks: Task[];
+  skipped_duplicates: number;
+  support: SupportPayload | null;
+}
+
+export interface TaskFocus {
+  now: Task[];
+  small: Task[];
+  later_today: Task[];
+  stale: Task[];
+  hidden_now: number;
+  backlog_count: number;
+}
+
+export interface NotificationPrefs {
+  push_enabled: boolean;
+  quiet_start: string; // "HH:MM:SS"
+  quiet_end: string;
+  nudge_hour: number;
+  max_per_day: number;
+  devices: number;
+  push_available: boolean;
+}
