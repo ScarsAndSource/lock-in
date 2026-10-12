@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     rate_limit_chat_per_hour: int = Field(default=60, ge=1)
     chat_retention_days: int = Field(default=90, ge=0)  # stored threads idle this long are pruned; 0 = keep forever
 
+    # --- tasks, reminders, web push -------------------------------------------
+    rate_limit_capture_per_minute: int = Field(default=10, ge=1)
+    rate_limit_push_test_per_hour: int = Field(default=6, ge=1)
+    vapid_public_key: str = ""   # empty => push is off; the in-app task list still works
+    vapid_private_key: str = ""
+    vapid_subject: str = ""      # "mailto:you@example.com" -- push services use it to contact you if needed
+    # A subscription endpoint is a URL OUR SERVER will POST to, so it must be a real push service (SSRF guard).
+    push_allowed_host_suffixes: list[str] = Field(
+        default_factory=lambda: [
+            "fcm.googleapis.com", "push.services.mozilla.com", "push.apple.com", "notify.windows.com",
+        ]
+    )
+
 
 
     @model_validator(mode="after")

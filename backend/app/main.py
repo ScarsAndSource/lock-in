@@ -15,9 +15,9 @@ from app.exceptions import (
     ConflictError, DailyLimitError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError,
 )
 from app.routers import (
-    chat, chat_threads, checkins, goals, habits, insights, intentions, missions,
+    chat, chat_threads, checkins, goals, habits, insights, intentions, missions, notifications,
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
-    study, support, urges,
+    study, support, tasks, urges,
 )
 from app.schema_check import check_schema
 
@@ -130,6 +130,7 @@ async def ready():
 for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
     study, urges, goals, intentions, chat, chat_threads, support, pauses, pause_shortcuts,
+    tasks, notifications,
 ):
     app.include_router(module.router)
 

@@ -345,4 +345,60 @@ class ChatMessage:
     meta: dict = field(default_factory=dict)
 
 
+# ---------------------------------------------------------------- tasks, nudges, push (slice 11)
+TASK_STATUSES = ("open", "done", "dropped")
+
+
+@dataclass(slots=True)
+class Task:
+    """
+    One thing the person wants to remember. importance: 1 small chore, 2 normal, 3 real deadline.
+    due_has_time=False means a date only (due_at is that day 23:59 local).
+    repeat_days = cadence counted from COMPLETION (call-someone / laundry style), never from a fixed calendar slot.
+    """
+    id: UUID
+    user_id: UUID
+    title: str
+    created_at: datetime
+    notes: str | None = None
+    source_text: str | None = None
+    importance: int = 2
+    status: str = "open"
+    due_at: datetime | None = None
+    due_has_time: bool = True
+    remind_at: datetime | None = None
+    repeat_days: int | None = None
+    snoozed_until: datetime | None = None
+    nudge_count: int = 0
+    last_nudged_at: datetime | None = None
+    last_done_at: datetime | None = None
+    done_count: int = 0
+    completed_at: datetime | None = None
+    ai_parsed: bool = False
+
+
+@dataclass(slots=True)
+class NotificationPrefs:
+    user_id: UUID
+    push_enabled: bool = True
+    quiet_start: time = time(22, 0)
+    quiet_end: time = time(8, 0)
+    nudge_hour: int = 18
+    max_per_day: int = 4
+    pushes_sent_day: date | None = None
+    pushes_sent: int = 0
+
+
+@dataclass(slots=True)
+class PushSubscription:
+    id: UUID
+    user_id: UUID
+    endpoint: str
+    p256dh: str
+    auth: str
+    created_at: datetime
+    user_agent: str | None = None
+    fail_count: int = 0
+
+
 
