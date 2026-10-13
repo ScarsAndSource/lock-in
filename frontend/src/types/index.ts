@@ -1,6 +1,6 @@
 export type Domain = 'habit' | 'screen_time' | 'urge' | 'study' | 'sleep';
 
-export type HabitStatus = 'done' | 'skipped' | 'partial';
+export type HabitStatus = 'done' | 'skipped' | 'partial' | 'floor' | 'stretch';
 
 export type ScreenTimeSource = 'manual' | 'extension';
 
@@ -33,6 +33,8 @@ export interface Habit {
   name: string;
   target_frequency: TargetFrequency;
   archived_at: string | null;
+  floor_text?: string | null;
+  stretch_text?: string | null;
 }
 
 export interface HabitLog {
@@ -138,6 +140,17 @@ export interface CheckinEntry {
   is_low_confidence: boolean;
   reason: string;
   is_scheduled: boolean;
+  floor_text?: string | null;
+  stretch_text?: string | null;
+}
+
+/** Set when yesterday's last scheduled day slipped: today's proposals are already lowered to the floor. */
+export interface Bounce {
+  active: boolean;
+  slip_streak: number;
+  tone: 'direct' | 'coach';
+  title: string | null;
+  message: string | null;
 }
 
 export interface SleepSection {
@@ -156,6 +169,7 @@ export interface CheckinView {
   entries: CheckinEntry[];
   sleep: SleepSection;
   screen_time: ScreenTimeSection;
+  bounce?: Bounce;
 }
 
 export interface CheckinOverride {
@@ -424,6 +438,8 @@ export interface PauseOverview {
   global_pause: PauseItem | null;
   habits: HabitPauseRow[];
 }
+
+export type TonePreference = 'auto' | 'direct' | 'coach';
 
 export interface Profile {
   timezone: string;

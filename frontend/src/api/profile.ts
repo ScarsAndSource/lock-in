@@ -1,5 +1,5 @@
 import { request, isDemoMode, isNotFound } from './client';
-import { Profile, MissionDetail, Intention, SupportPayload, DueIntention } from '../types';
+import { Profile, MissionDetail, Intention, SupportPayload, DueIntention, TonePreference } from '../types';
 import { INITIAL_PROFILE, INITIAL_MISSION, INITIAL_INTENTIONS } from '../store/mockData';
 import { localTodayISO } from '../lib/dates';
 
@@ -22,6 +22,17 @@ export async function patchProfile(timezone: string): Promise<Profile> {
   return request<Profile>('/me', {
     method: 'PATCH',
     body: JSON.stringify({ timezone }),
+  });
+}
+
+export async function patchTone(tone_preference: TonePreference): Promise<Profile> {
+  if (isDemoMode()) {
+    localProfile.tone_preference = tone_preference;
+    return { ...localProfile, today: localTodayISO() };
+  }
+  return request<Profile>('/me', {
+    method: 'PATCH',
+    body: JSON.stringify({ tone_preference }),
   });
 }
 

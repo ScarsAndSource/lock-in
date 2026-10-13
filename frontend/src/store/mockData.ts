@@ -26,7 +26,7 @@ const D = (offset: number) => addDaysISO(T, offset); // T-N = D(-N)
 
 export const INITIAL_PROFILE: Profile = {
   timezone: 'Asia/Kolkata',
-  tone_preference: 'direct',
+  tone_preference: 'auto',
   today: T,
 };
 

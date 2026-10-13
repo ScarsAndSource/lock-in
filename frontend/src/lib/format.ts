@@ -1,4 +1,29 @@
-import type { ChainDomainStatus } from '../types';
+import type { ChainDomainStatus, HabitStatus } from '../types';
+
+/** The tiers a user can tap, best to worst. Legacy 'partial' is only offered when a day already holds it. */
+const HABIT_TIERS: HabitStatus[] = ['stretch', 'done', 'floor', 'skipped'];
+
+export function habitTierOptions(current?: HabitStatus | null): HabitStatus[] {
+  return current === 'partial' ? ['stretch', 'done', 'partial', 'floor', 'skipped'] : HABIT_TIERS;
+}
+
+const HABIT_STATUS_LABEL: Record<HabitStatus, string> = {
+  stretch: 'Stretch',
+  done: 'Done',
+  floor: 'Floor',
+  partial: 'Part',
+  skipped: 'Miss',
+};
+
+export function habitStatusLabel(status: HabitStatus): string {
+  return HABIT_STATUS_LABEL[status];
+}
+
+/** "Floor: 10 min walk · Stretch: full hour", or null when the habit has no tier text. */
+export function tierHint(floor?: string | null, stretch?: string | null): string | null {
+  const parts = [floor ? `Floor: ${floor}` : null, stretch ? `Stretch: ${stretch}` : null].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
 
 export function formatPct(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '—';
