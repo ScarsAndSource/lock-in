@@ -22,6 +22,10 @@ class DataIntegrityError(LockinError):
     """Stored data failed an integrity check (e.g. undecryptable journal). Never swallowed."""
 
 
+class ServiceUnavailableError(LockinError):
+    """A dependency this feature needs (the AI provider) is down or not configured. Maps to 503."""
+
+
 class RateLimitedError(LockinError):
     def __init__(self, retry_after: int):
         super().__init__("Too many requests.")

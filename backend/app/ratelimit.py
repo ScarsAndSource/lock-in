@@ -63,6 +63,19 @@ def get_limiter() -> SlidingWindowLimiter:
     return _limiter
 
 
+def enforce_media_limits(user_id: UUID, settings: Settings) -> None:
+    """Voice and screenshot uploads share one per-minute and one per-hour budget (they cost a model call each)."""
+    if not settings.rate_limit_enabled:
+        return
+    for bucket, limit, window in (
+        ("media_min", settings.rate_limit_media_per_minute, 60),
+        ("media_hour", settings.rate_limit_media_per_hour, 3600),
+    ):
+        retry_after = get_limiter().check(f"{bucket}:{user_id}", limit, window)
+        if retry_after is not None:
+            raise RateLimitedError(retry_after)
+
+
 def rate_limit(bucket: str, *, limit_setting: str = "rate_limit_per_minute", window_seconds: int = 60):
     async def _dependency(
         user_id: UUID = Depends(get_current_user_id),

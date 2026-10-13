@@ -10,6 +10,7 @@ Privacy: prompts, completions and the key are never logged.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,14 @@ class LLMClient(Protocol):
         ...
 
 
+class MediaLLM(LLMClient, Protocol):
+    """Speech-to-text and image reading, for voice check-in and screenshot screen time."""
+
+    async def transcribe(self, audio: bytes, filename: str, content_type: str) -> str: ...
+
+    async def describe_image(self, image: bytes, media_type: str, prompt: str, *, max_tokens: int = 400) -> str: ...
+
+
 def _retry_after(resp: httpx.Response) -> float | None:
     try:
         return float(resp.headers.get("retry-after", ""))
@@ -70,8 +79,12 @@ class GroqClient:
         json_mode: bool = True,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        transcribe_model: str = "whisper-large-v3-turbo",
+        vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct",
     ):
         self.model = model
+        self.transcribe_model = transcribe_model
+        self.vision_model = vision_model
         self.last_tokens = 0
         self._key = api_key
         self._timeout = timeout
@@ -82,8 +95,6 @@ class GroqClient:
         self._sleep = sleep or asyncio.sleep
 
     async def complete(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.3) -> str:
-        if not self._key:
-            raise LLMUnavailableError("GROQ_API_KEY is not set.")
         payload: dict = {
             "model": self.model,
             "messages": messages,
@@ -92,26 +103,65 @@ class GroqClient:
         }
         if self._json_mode:
             payload["response_format"] = {"type": "json_object"}
-        headers = {"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"}
-        url = f"{self._base_url}/chat/completions"
+        return self._parse(await self._send("/chat/completions", json_body=payload))
+
+    async def transcribe(self, audio: bytes, filename: str, content_type: str) -> str:
+        """Speech to text. Returns the stripped transcript, which may be empty (silence)."""
+        self.last_tokens = 0  # audio calls report no token usage; don't let the previous call's number leak in
+        resp = await self._send(
+            "/audio/transcriptions",
+            data={"model": self.transcribe_model, "response_format": "json", "temperature": "0"},
+            files={"file": (filename, audio, content_type)},
+        )
+        try:
+            text = resp.json()["text"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise LLMError("Groq returned an unexpected transcription shape.") from exc
+        if not isinstance(text, str):
+            raise LLMError("Groq returned an unexpected transcription shape.")
+        return text.strip()
+
+    async def describe_image(self, image: bytes, media_type: str, prompt: str, *, max_tokens: int = 400) -> str:
+        """One vision call. No JSON mode here (vision models don't all support it): the prompt asks for JSON."""
+        data_url = f"data:{media_type};base64,{base64.b64encode(image).decode('ascii')}"
+        payload = {
+            "model": self.vision_model,
+            "max_tokens": max_tokens,
+            "temperature": 0,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }],
+        }
+        return self._parse(await self._send("/chat/completions", json_body=payload))
+
+    async def _send(self, path: str, *, json_body: dict | None = None, data: dict | None = None, files=None) -> httpx.Response:
+        """POST with the retry/backoff and error mapping every Groq call shares. Returns only a 200 response."""
+        if not self._key:
+            raise LLMUnavailableError("GROQ_API_KEY is not set.")
+        headers = {"Authorization": f"Bearer {self._key}"}  # httpx sets Content-Type (json or multipart boundary)
+        url = f"{self._base_url}{path}"
         reason = "unknown"
         for attempt in range(self._max_retries + 1):
             wait: float | None = None
             try:
                 async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-                    resp = await client.post(url, json=payload, headers=headers)
+                    resp = await client.post(url, json=json_body, data=data, files=files, headers=headers)
             except httpx.TimeoutException:
                 reason = "timeout"
             except httpx.HTTPError:
                 reason = "network error"
             else:
                 if resp.status_code == 200:
-                    return self._parse(resp)
+                    return resp
                 if resp.status_code in (401, 403):
                     logger.error("Groq auth failed (HTTP %s) -- check GROQ_API_KEY", resp.status_code)
                     raise LLMUnavailableError(f"Groq rejected our credentials (HTTP {resp.status_code}).")
                 if resp.status_code == 400:
-                    raise LLMError("Groq rejected the request (HTTP 400).")  # e.g. JSON mode failed
+                    raise LLMError("Groq rejected the request (HTTP 400).")  # e.g. JSON mode failed, bad audio/image
                 if resp.status_code not in _RETRYABLE_STATUS:
                     raise LLMUnavailableError(f"Groq rejected the request (HTTP {resp.status_code}).")
                 reason = f"HTTP {resp.status_code}"
@@ -169,14 +219,14 @@ class BudgetedLLM:
     def for_feature(self, feature: str) -> "BudgetedLLM":
         return BudgetedLLM(self._inner, self._usage, self._user_id, self._cap, feature, self._clock)
 
-    async def complete(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.3) -> str:
+    async def _metered(self, call: Callable[[], Awaitable[str]]) -> str:
         day = self._clock().astimezone(timezone.utc).date()
         total = await self._usage.consume(self._user_id, day, self._feature)
         if total > self._cap:
             await self._usage.release(self._user_id, day, self._feature)
             raise LLMBudgetExceeded("Daily AI limit reached.")
         try:
-            text = await self._inner.complete(messages, max_tokens=max_tokens, temperature=temperature)
+            text = await call()
         except LLMUnavailableError:
             await self._usage.release(self._user_id, day, self._feature)
             raise
@@ -184,6 +234,19 @@ class BudgetedLLM:
         if tokens:
             await self._usage.add_tokens(self._user_id, day, self._feature, tokens)
         return text
+
+    async def complete(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.3) -> str:
+        return await self._metered(
+            lambda: self._inner.complete(messages, max_tokens=max_tokens, temperature=temperature)
+        )
+
+    async def transcribe(self, audio: bytes, filename: str, content_type: str) -> str:
+        return await self._metered(lambda: self._inner.transcribe(audio, filename, content_type))
+
+    async def describe_image(self, image: bytes, media_type: str, prompt: str, *, max_tokens: int = 400) -> str:
+        return await self._metered(
+            lambda: self._inner.describe_image(image, media_type, prompt, max_tokens=max_tokens)
+        )
 
 
 def scoped(llm: LLMClient, feature: str) -> LLMClient:

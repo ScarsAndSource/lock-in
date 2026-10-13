@@ -12,10 +12,11 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.db import engine, ping_database
 from app.exceptions import (
-    ConflictError, DailyLimitError, DataIntegrityError, NotFoundError, RateLimitedError, ValidationError,
+    ConflictError, DailyLimitError, DataIntegrityError, NotFoundError, RateLimitedError,
+    ServiceUnavailableError, ValidationError,
 )
 from app.routers import (
-    chat, chat_threads, checkins, goals, habits, insights, intentions, missions, notifications,
+    chat, chat_threads, checkins, goals, habits, insights, intentions, missions, mood, notifications,
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
     study, support, tasks, urges,
 )
@@ -25,6 +26,9 @@ settings = get_settings()
 logger = logging.getLogger("lockin")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 _MAX_BODY_BYTES = 256 * 1024
+# The only routes that take a file. The services re-check the real size while reading, so this is just the front gate.
+_UPLOAD_BODY_BYTES = 5 * 1024 * 1024
+_UPLOAD_PATHS = frozenset({"/checkins/voice", "/screen-time/parse-screenshot"})
 
 
 @asynccontextmanager
@@ -51,7 +55,8 @@ async def request_context(request: Request, call_next):
     request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
     request.state.request_id = request_id
     length = request.headers.get("content-length", "")
-    if length.isdigit() and int(length) > _MAX_BODY_BYTES:
+    limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
+    if length.isdigit() and int(length) > limit:
         return JSONResponse(
             status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
         )
@@ -99,6 +104,11 @@ async def daily_limit_handler(request: Request, exc: DailyLimitError) -> JSONRes
     )
 
 
+@app.exception_handler(ServiceUnavailableError)
+async def unavailable_handler(request: Request, exc: ServiceUnavailableError) -> JSONResponse:
+    return _detail(status.HTTP_503_SERVICE_UNAVAILABLE, exc)
+
+
 @app.exception_handler(DataIntegrityError)
 async def integrity_handler(request: Request, exc: DataIntegrityError) -> JSONResponse:
     logger.error("DATA INTEGRITY: %s request_id=%s", exc, getattr(request.state, "request_id", "?"))
@@ -130,7 +140,7 @@ async def ready():
 for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
     study, urges, goals, intentions, chat, chat_threads, support, pauses, pause_shortcuts,
-    tasks, notifications,
+    tasks, notifications, mood,
 ):
     app.include_router(module.router)
 
