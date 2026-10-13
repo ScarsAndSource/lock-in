@@ -16,10 +16,14 @@ class InMemoryHabitRepository:
         self._habits: dict[UUID, HabitDefinition] = {}
         self._logs: dict[tuple[UUID, date], HabitLog] = {}  # (habit_id, log_date)
 
-    async def create_habit(self, user_id: UUID, name: str, target_frequency: TargetFrequency) -> HabitDefinition:
+    async def create_habit(
+        self, user_id: UUID, name: str, target_frequency: TargetFrequency,
+        floor_text: str | None = None, stretch_text: str | None = None,
+    ) -> HabitDefinition:
         habit = HabitDefinition(
             id=uuid4(), user_id=user_id, name=name,
             target_frequency=target_frequency, created_at=datetime.now(timezone.utc),
+            floor_text=floor_text, stretch_text=stretch_text,
         )
         self._habits[habit.id] = habit
         return habit
@@ -34,7 +38,9 @@ class InMemoryHabitRepository:
         habit = self._habits.get(habit_id)
         return habit if habit is not None and habit.user_id == user_id else None
 
-    async def update_habit(self, user_id, habit_id, name, archived, now, target_frequency=None) -> HabitDefinition | None:
+    async def update_habit(
+        self, user_id, habit_id, name, archived, now, target_frequency=None, tier_text=None,
+    ) -> HabitDefinition | None:
         habit = await self.get_habit(user_id, habit_id)
         if habit is None:
             return None
@@ -46,6 +52,8 @@ class InMemoryHabitRepository:
             habit.archived_at = None
         if target_frequency is not None:
             habit.target_frequency = target_frequency
+        for key, value in (tier_text or {}).items():
+            setattr(habit, key, value)
         return habit
 
     async def get_recent_logs_by_habit(
@@ -127,7 +135,7 @@ class InMemoryProfileRepository:
         self._profiles: dict[UUID, Profile] = {}
 
     async def get_or_create(self, user_id: UUID) -> Profile:
-        return self._profiles.setdefault(user_id, Profile(user_id=user_id, timezone="UTC", tone_preference="direct"))
+        return self._profiles.setdefault(user_id, Profile(user_id=user_id, timezone="UTC", tone_preference="auto"))
 
     async def get(self, user_id: UUID) -> Profile:
         return await self.get_or_create(user_id)
@@ -135,6 +143,11 @@ class InMemoryProfileRepository:
     async def set_timezone(self, user_id: UUID, tz_name: str) -> Profile:
         profile = await self.get_or_create(user_id)
         profile.timezone = tz_name
+        return profile
+
+    async def set_tone(self, user_id: UUID, tone_preference: str) -> Profile:
+        profile = await self.get_or_create(user_id)
+        profile.tone_preference = tone_preference
         return profile
 
 
