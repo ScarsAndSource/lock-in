@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from app.deps import get_checkins_service, get_profile_service
 from app.ratelimit import rate_limit
 from app.routers.mappers import (
-    entry_out, screen_out, screen_proposal_out, sleep_out, sleep_proposal_out,
+    bounce_out, entry_out, screen_out, screen_proposal_out, sleep_out, sleep_proposal_out,
 )
 from app.safety import is_crisis, support_payload
 from app.schemas import (
@@ -27,6 +27,7 @@ async def get_checkin_defaults(
     checkin_date: date,
     user_id: UUID = Depends(get_current_user_id),
     service: CheckinsService = Depends(get_checkins_service),
+    profiles: ProfileService = Depends(get_profile_service),
 ) -> CheckinViewOut:
     view = await service.get_view(user_id, checkin_date)
     return CheckinViewOut(
@@ -37,6 +38,7 @@ async def get_checkin_defaults(
         screen_time=ScreenTimeSectionOut(
             logged=screen_out(view.screen_log), proposal=screen_proposal_out(view.screen_proposal)
         ),
+        bounce=bounce_out(view.bounce, (await profiles.get(user_id)).tone_preference),
     )
 
 

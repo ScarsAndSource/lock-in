@@ -28,7 +28,10 @@ async def create_habit(
     user_id: UUID = Depends(get_current_user_id),
     service: HabitsService = Depends(get_habits_service),
 ) -> HabitOut:
-    habit = await service.create_habit(user_id, body.name, _to_domain_frequency(body.target_frequency))
+    habit = await service.create_habit(
+        user_id, body.name, _to_domain_frequency(body.target_frequency),
+        floor_text=body.floor_text, stretch_text=body.stretch_text,
+    )
     return habit_out(habit)
 
 
@@ -48,10 +51,13 @@ async def update_habit(
     user_id: UUID = Depends(get_current_user_id),
     service: HabitsService = Depends(get_habits_service),
 ) -> HabitOut:
-    """Rename, archive/unarchive, and/or change the schedule. Past logs are kept; consistency
-    for past windows is read under the CURRENT schedule."""
+    """Rename, archive/unarchive, change the schedule and/or the floor/stretch text. Past logs are kept;
+    consistency for past windows is read under the CURRENT schedule."""
     freq = _to_domain_frequency(body.target_frequency) if body.target_frequency is not None else None
-    return habit_out(await service.update_habit(user_id, habit_id, body.name, body.archived, freq))
+    tier_text = {k: getattr(body, k) for k in ("floor_text", "stretch_text") if k in body.model_fields_set}
+    return habit_out(
+        await service.update_habit(user_id, habit_id, body.name, body.archived, freq, tier_text or None)
+    )
 
 
 @router.post("/{habit_id}/logs", response_model=HabitLogOut, status_code=status.HTTP_200_OK)

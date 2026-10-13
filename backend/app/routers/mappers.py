@@ -2,21 +2,27 @@ from __future__ import annotations
 
 from app.domain import HabitDefinition, Mission, ScreenTimeLog, ScreenTimeProposal, SleepLog, SleepProposal
 from app.schemas import (
-    CheckinEntryOut, HabitConsistencyOut, HabitOut, MissionOut,
+    BounceOut, CheckinEntryOut, HabitConsistencyOut, HabitOut, MissionOut,
     ScreenTimeLogOut, ScreenTimeProposalOut, SleepLogOut, SleepProposalOut,
 )
+from app.services.bounce_back import BounceState, bounce_copy
 from app.services.checkins_service import CheckinEntry
 from app.services.consistency_service import HabitConsistency
+from app.services.tone import resolve_tone
 
 
 def habit_out(h: HabitDefinition) -> HabitOut:
-    return HabitOut(id=h.id, name=h.name, target_frequency=h.target_frequency.to_dict(), archived_at=h.archived_at)
+    return HabitOut(
+        id=h.id, name=h.name, target_frequency=h.target_frequency.to_dict(), archived_at=h.archived_at,
+        floor_text=h.floor_text, stretch_text=h.stretch_text,
+    )
 
 
 def entry_out(e: CheckinEntry) -> CheckinEntryOut:
     return CheckinEntryOut(
         habit_id=e.habit_id, habit_name=e.habit_name, status=e.status, is_default=e.is_default,
         is_low_confidence=e.is_low_confidence, reason=e.reason, is_scheduled=e.is_scheduled,
+        floor_text=e.floor_text, stretch_text=e.stretch_text,
     )
 
 
@@ -66,4 +72,13 @@ def consistency_out(c: HabitConsistency) -> HabitConsistencyOut:
         habit_id=c.habit_id, habit_name=c.habit_name, consistency_pct=c.consistency_pct,
         coverage_pct=c.coverage_pct, longest_run=c.longest_run, current_run=c.current_run,
         run_unit=c.run_unit, comeback_rate=c.comeback_rate,
+    )
+
+
+def bounce_out(state: BounceState, tone_preference: str) -> BounceOut:
+    tone = resolve_tone(tone_preference, state.slip_streak)
+    copy = bounce_copy(state, tone)
+    return BounceOut(
+        active=state.active, slip_streak=state.slip_streak, tone=tone,
+        title=copy[0] if copy else None, message=copy[1] if copy else None,
     )

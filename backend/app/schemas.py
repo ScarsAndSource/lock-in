@@ -30,21 +30,31 @@ class NPerWeekFrequency(BaseModel):
 
 TargetFrequencyIn = Annotated[WeekdaysFrequency | NPerWeekFrequency, Field(discriminator="type")]
 
+TierText = Annotated[str | None, Field(max_length=120)]
+
 
 class HabitCreateRequest(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=200)]
     target_frequency: TargetFrequencyIn
+    floor_text: TierText = None    # the minimum version that still counts ("10 min walk")
+    stretch_text: TierText = None  # beyond the target ("full 60 min")
 
 
 class HabitPatchRequest(BaseModel):
     name: Annotated[str | None, Field(min_length=1, max_length=200)] = None
     archived: bool | None = None
     target_frequency: TargetFrequencyIn | None = None
+    # Sending null/"" clears the text; leaving the key out leaves it untouched.
+    floor_text: TierText = None
+    stretch_text: TierText = None
 
     @model_validator(mode="after")
     def _at_least_one(self) -> "HabitPatchRequest":
-        if self.name is None and self.archived is None and self.target_frequency is None:
-            raise ValueError("Provide at least one of: name, archived, target_frequency")
+        sent = self.model_fields_set
+        if self.name is None and self.archived is None and self.target_frequency is None and not (
+            sent & {"floor_text", "stretch_text"}
+        ):
+            raise ValueError("Provide at least one of: name, archived, target_frequency, floor_text, stretch_text")
         return self
 
 
@@ -53,6 +63,8 @@ class HabitOut(BaseModel):
     name: str
     target_frequency: dict
     archived_at: datetime | None
+    floor_text: str | None = None
+    stretch_text: str | None = None
 
 
 class HabitLogRequest(BaseModel):
@@ -130,6 +142,17 @@ class CheckinEntryOut(BaseModel):
     is_low_confidence: bool
     reason: str
     is_scheduled: bool = True
+    floor_text: str | None = None
+    stretch_text: str | None = None
+
+
+class BounceOut(BaseModel):
+    """Set when yesterday's last scheduled day slipped: today's proposals are already lowered to the floor."""
+    active: bool = False
+    slip_streak: int = 0
+    tone: str = "direct"
+    title: str | None = None
+    message: str | None = None
 
 
 class SleepProposalOut(BaseModel):
@@ -164,6 +187,7 @@ class CheckinViewOut(BaseModel):
     entries: list[CheckinEntryOut]
     sleep: SleepSectionOut
     screen_time: ScreenTimeSectionOut
+    bounce: BounceOut = Field(default_factory=BounceOut)
 
 
 class CheckinOverrideIn(BaseModel):
@@ -335,7 +359,23 @@ class ProfileOut(BaseModel):
 
 
 class ProfilePatchRequest(BaseModel):
-    timezone: Annotated[str, Field(min_length=1, max_length=64)]
+    timezone: Annotated[str | None, Field(min_length=1, max_length=64)] = None
+    tone_preference: Literal["auto", "direct", "coach"] | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "ProfilePatchRequest":
+        if self.timezone is None and self.tone_preference is None:
+            raise ValueError("Provide at least one of: timezone, tone_preference")
+        return self
+
+
+class BounceRateOut(BaseModel):
+    """North-star: of slip days old enough to judge, the share followed by a held day within 48h."""
+    end_date: date
+    window_days: int
+    slip_days: int
+    returned_within_48h: int
+    rate_pct: float | None
 
 
 class DeleteAccountRequest(BaseModel):
