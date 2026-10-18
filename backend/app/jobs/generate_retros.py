@@ -104,7 +104,7 @@ async def _run_user(user_id: UUID, inner_llm: LLMClient, settings: Settings, clo
                 await apply_rls_context(session, user_id)
             llm = BudgetedLLM(
                 inner_llm,
-                SqlAlchemyLlmUsageRepository(session),
+                SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced),
                 user_id,
                 settings.llm_daily_call_cap,
                 "retro",

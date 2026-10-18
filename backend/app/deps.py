@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
-from app.db import get_db
+from app.db import AsyncSessionLocal, get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
@@ -89,8 +89,8 @@ def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchem
     return SqlAlchemyInsightRepository(session)
 
 
-def get_llm_usage_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyLlmUsageRepository:
-    return SqlAlchemyLlmUsageRepository(session)
+def get_llm_usage_repository(settings: Settings = Depends(get_settings)) -> SqlAlchemyLlmUsageRepository:
+    return SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced)
 
 
 def get_chat_thread_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyChatThreadRepository:
