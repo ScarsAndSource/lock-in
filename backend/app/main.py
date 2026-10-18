@@ -40,33 +40,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Lock'in API", version="0.2.0", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.middleware("http")
-async def request_context(request: Request, call_next):
-    incoming = request.headers.get("x-request-id", "")
-    request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
-    request.state.request_id = request_id
-    length = request.headers.get("content-length", "")
-    limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
-    if length.isdigit() and int(length) > limit:
-        return JSONResponse(
-            status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
-        )
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    response.headers.setdefault("Cache-Control", "no-store")  # personal data: never cache
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    return response
-
-
 def _detail(code: int, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=code, content={"detail": str(exc)})
 
@@ -120,6 +93,39 @@ async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception("Unhandled error request_id=%s path=%s", request_id, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal error.", "request_id": request_id})
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    incoming = request.headers.get("x-request-id", "")
+    request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
+    request.state.request_id = request_id
+    length = request.headers.get("content-length", "")
+    limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
+    if length.isdigit() and int(length) > limit:
+        res = JSONResponse(
+            status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
+        )
+        res.headers.setdefault("Cache-Control", "no-store")
+        res.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return res
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        response = await unhandled_handler(request, exc)
+    response.headers["X-Request-ID"] = request_id
+    response.headers.setdefault("Cache-Control", "no-store")  # personal data: never cache
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health", tags=["meta"])
