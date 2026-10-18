@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lockin-weave-v1';
+const CACHE_NAME = 'lockin-weave-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

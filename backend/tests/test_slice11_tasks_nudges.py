@@ -517,3 +517,11 @@ def test_send_test_requires_a_device():
     nrepo.subs = []
     with pytest.raises(ValidationError):
         run(svc.send_test(UID))
+
+
+def test_transient_failure_never_counts_or_deletes():
+    t = task(importance=3, due_at=NOW - timedelta(minutes=10))
+    svc, trepo, nrepo, sender = make_dispatch(tasks=[t], sender=FakeSender(PushOutcome.TRANSIENT))
+    for _ in range(10):
+        run(svc.dispatch(UID))
+    assert len(nrepo.subs) == 1 and nrepo.subs[0].fail_count == 0

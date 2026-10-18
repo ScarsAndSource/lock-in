@@ -207,6 +207,8 @@ def get_llm_client(
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
+        transcribe_model=settings.groq_transcribe_model,
+        vision_model=settings.groq_vision_model,
     )
     return BudgetedLLM(inner, usage, user_id, settings.llm_daily_call_cap, "chat", clock)
 
