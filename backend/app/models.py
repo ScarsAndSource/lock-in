@@ -111,7 +111,7 @@ class ScreenTimeLogORM(Base):
     __tablename__ = "screen_time_logs"
     __table_args__ = (
         UniqueConstraint("user_id", "log_date", name="screen_time_logs_user_id_log_date_key"),
-        CheckConstraint("source in ('manual', 'extension')", name="screen_time_logs_source_check"),
+        CheckConstraint("source in ('manual', 'extension', 'screenshot')", name="screen_time_logs_source_check"),
         CheckConstraint("total_minutes >= 0", name="screen_time_logs_minutes_check"),
     )
 
@@ -122,6 +122,23 @@ class ScreenTimeLogORM(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False)
     category_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_default: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MoodLogORM(Base):
+    __tablename__ = "mood_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "log_date", name="mood_logs_user_id_log_date_key"),
+        CheckConstraint("valence between 1 and 5", name="mood_logs_valence_check"),
+        CheckConstraint("energy between 1 and 5", name="mood_logs_energy_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    log_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    valence: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    energy: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

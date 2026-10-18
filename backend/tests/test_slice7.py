@@ -469,3 +469,8 @@ def test_checkin_confirm_flags_crisis_text_but_still_saves(world, user_a):
 
     normal = c.post("/checkins/2026-12-29/confirm", json={"journal_text": "Rough day, skipped gym"})
     assert normal.status_code == 200 and normal.json()["support"] is None
+
+
+@pytest.mark.parametrize("text", ["ran 5 kms today", "Cycle 10 kms", "walk 3 km", "jogged 2.5 kms", "a few kms", "did 12kms"])
+def test_distance_kms_is_not_crisis(text):
+    assert not is_crisis(text)

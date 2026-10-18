@@ -28,6 +28,7 @@ from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
+from app.repositories.pause_repository import SqlAlchemyPauseRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
 from app.repositories.screen_time_repository import SqlAlchemyScreenTimeRepository
@@ -78,6 +79,7 @@ def build_retro_service(session, llm: LLMClient, settings: Settings, clock: Cloc
         profiles,
         study_repo,
         urge_repo,
+        SqlAlchemyPauseRepository(session),
     )
     study = StudyService(SqlAlchemySubjectRepository(session), study_repo, clock)
     encryptor = FieldEncryptor(settings.field_encryption_key, settings.old_encryption_keys)
@@ -121,6 +123,8 @@ async def run_once(llm: LLMClient | None = None, clock: Clock = utc_now) -> dict
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
+        transcribe_model=settings.groq_transcribe_model,
+        vision_model=settings.groq_vision_model,
     )
     counts = {"users": 0, "retros": 0, "errors": 0}
     for user_id in await active_user_ids(clock):

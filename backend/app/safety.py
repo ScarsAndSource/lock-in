@@ -73,12 +73,15 @@ def support_payload(timezone: str | None = None, region: str | None = None) -> d
 
 # ---------------------------------------------------------------- detection
 
+_DISTANCE_KMS = re.compile(r"(?:\d[\d.,]*|\b(?:few|some|many|several|couple of|x))\s*kms\b")
+
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
 
 
 def _normalize(text: str) -> str:
     t = unicodedata.normalize("NFKC", text[:5000]).lower()
     t = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", t)  # zero-width characters
+    t = _DISTANCE_KMS.sub(" km ", t)
     t = t.replace("'", "").replace("\u2019", "").replace("`", "")  # don't -> dont
     t = t.translate(_LEET)  # k1ll -> kill
     t = re.sub(r"(?<=[a-z])[!*#](?=[a-z])", "i", t)  # k*ll / k!ll -> kill
