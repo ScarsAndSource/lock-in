@@ -30,6 +30,7 @@ from app.services.profile_service import ProfileService
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
 from app.services.urges_service import UrgesService
+from app.services.tone import resolve_tone
 from app.voice_config import chat_system_prompt
 
 logger = logging.getLogger("lockin.chat")
@@ -94,10 +95,14 @@ class ChatService:
             return ChatReply(mode="no_data", reply=NO_DATA_REPLY)
 
         facts_json = json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
+        tone = resolve_tone(
+            (await self._profiles.get(user_id)).tone_preference,
+            (await self._stats.bounce_state(user_id, None)).slip_streak,
+        )
 
         # 3. model call, user text isolated as data
         messages: list[dict] = [
-            {"role": "system", "content": chat_system_prompt()},
+            {"role": "system", "content": chat_system_prompt(tone)},
             {"role": "user", "content": f"<facts>\n{facts_json}\n</facts>"},
         ]
         for role, content in history:

@@ -64,9 +64,18 @@ USE: "Three logged days isn't enough to call a pattern. Log through Sunday and t
 """
 
 
-def render_voice() -> str:
-    """Base voice for every LLM feature: rules + worked examples."""
-    return f"{_RULES}\n{_EXAMPLES}"
+COACH_OVERLAY = """\
+REGISTER: COACH. Same facts, same rules, same numbers and the same single next step. Only the delivery changes.
+- Warmer and steadier. One short, plain acknowledgement that a day went differently is fine; never cushion the facts themselves.
+- Frame the next step as small and doable. Lead with what held when something did. Never invent a positive.
+- Still no exclamation points, no emojis, no cheerleading, no identity-level language, no guilt, no urgency.
+"""
+
+
+def render_voice(tone: str = "direct") -> str:
+    """Base voice for every LLM feature: rules + worked examples (+ the coach overlay when asked)."""
+    base = f"{_RULES}\n{_EXAMPLES}"
+    return f"{base}\n{COACH_OVERLAY}" if tone == "coach" else base
 
 
 RETRO_TASK = """\
@@ -148,14 +157,14 @@ REJECT (scoreboard): "Habits 38%, study 1 of 5 sessions, 3 relapses, 4 slip days
 """
 
 
-def retro_system_prompt(mode: str = "normal") -> str:
+def retro_system_prompt(mode: str = "normal", tone: str = "direct") -> str:
     task = RETRO_ROUGH_TASK if mode == "rough" else RETRO_TASK
-    return f"{render_voice()}\n\n{task}"
+    return f"{render_voice(tone)}\n\n{task}"
 
 
-def insight_system_prompt() -> str:
-    return f"{render_voice()}\n\n{INSIGHT_TASK}"
+def insight_system_prompt(tone: str = "direct") -> str:
+    return f"{render_voice(tone)}\n\n{INSIGHT_TASK}"
 
 
-def chat_system_prompt() -> str:
-    return f"{render_voice()}\n\n{CHAT_TASK}"
+def chat_system_prompt(tone: str = "direct") -> str:
+    return f"{render_voice(tone)}\n\n{CHAT_TASK}"
