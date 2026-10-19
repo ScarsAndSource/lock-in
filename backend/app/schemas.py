@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from app.domain import HabitStatus, MissionStatus, ScreenTimeSource
 from app.schemas_chat import SupportOut
@@ -30,7 +30,14 @@ class NPerWeekFrequency(BaseModel):
 
 TargetFrequencyIn = Annotated[WeekdaysFrequency | NPerWeekFrequency, Field(discriminator="type")]
 
-TierText = Annotated[str | None, Field(max_length=120)]
+def _clean_tier_text(value: str | None) -> str | None:
+    """Trim; blank means "no text" (so PATCH with "   " clears it, like null)."""
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+TierText = Annotated[str | None, Field(max_length=120), AfterValidator(_clean_tier_text)]
 
 
 class HabitCreateRequest(BaseModel):
