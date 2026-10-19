@@ -8,7 +8,7 @@ def test_get_me_returns_profile(world, user_a):
     assert r.status_code == 200
     data = r.json()
     assert data["timezone"] == "UTC"
-    assert data["tone_preference"] == "direct"
+    assert data["tone_preference"] == "auto"  # migration 014 default
     assert "today" in data
 
 

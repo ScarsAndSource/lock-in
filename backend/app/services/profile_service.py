@@ -5,7 +5,9 @@ from uuid import UUID
 
 from app.dates import Clock, user_today, utc_now, validate_timezone
 from app.domain import Profile
+from app.exceptions import ValidationError
 from app.repositories.profile_repository import ProfileRepository
+from app.services.tone import TONES
 
 
 class ProfileService:
@@ -18,6 +20,11 @@ class ProfileService:
 
     async def set_timezone(self, user_id: UUID, tz_name: str) -> Profile:
         return await self._repo.set_timezone(user_id, validate_timezone(tz_name))
+
+    async def set_tone(self, user_id: UUID, tone_preference: str) -> Profile:
+        if tone_preference not in TONES:
+            raise ValidationError(f"tone_preference must be one of: {', '.join(TONES)}.")
+        return await self._repo.set_tone(user_id, tone_preference)
 
     async def today(self, user_id: UUID) -> date:
         profile = await self.get(user_id)

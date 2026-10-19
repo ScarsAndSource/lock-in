@@ -35,7 +35,10 @@ async def patch_me(
     user_id: UUID = Depends(get_current_user_id),
     service: ProfileService = Depends(get_profile_service),
 ) -> ProfileOut:
-    await service.set_timezone(user_id, body.timezone)
+    if body.timezone is not None:
+        await service.set_timezone(user_id, body.timezone)
+    if body.tone_preference is not None:
+        await service.set_tone(user_id, body.tone_preference)
     return await _profile_out(service, user_id)
 
 
