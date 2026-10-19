@@ -14,10 +14,13 @@ class HabitsService:
         self._habits = habit_repo
         self._clock = clock
 
-    async def create_habit(self, user_id: UUID, name: str, target_frequency: TargetFrequency) -> HabitDefinition:
+    async def create_habit(
+        self, user_id: UUID, name: str, target_frequency: TargetFrequency,
+        floor_text: str | None = None, stretch_text: str | None = None,
+    ) -> HabitDefinition:
         if not name.strip():
             raise ValidationError("Habit name can't be blank.")
-        return await self._habits.create_habit(user_id, name.strip(), target_frequency)
+        return await self._habits.create_habit(user_id, name.strip(), target_frequency, floor_text, stretch_text)
 
     async def list_habits(self, user_id: UUID, include_archived: bool = False) -> list[HabitDefinition]:
         if include_archived:
@@ -27,12 +30,13 @@ class HabitsService:
     async def update_habit(
         self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None,
         target_frequency: TargetFrequency | None = None,
+        tier_text: dict[str, str | None] | None = None,
     ) -> HabitDefinition:
         if name is not None and not name.strip():
             raise ValidationError("Habit name can't be blank.")
         habit = await self._habits.update_habit(
             user_id, habit_id, name.strip() if name is not None else None, archived, self._clock(),
-            target_frequency=target_frequency,
+            target_frequency=target_frequency, tier_text=tier_text,
         )
         if habit is None:
             raise NotFoundError(f"No habit {habit_id} for this user.")

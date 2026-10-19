@@ -16,7 +16,8 @@ DEFAULT_HISTORY_LOOKBACK_DAYS = 60
 
 class HabitRepository(Protocol):
     async def create_habit(
-        self, user_id: UUID, name: str, target_frequency: TargetFrequency
+        self, user_id: UUID, name: str, target_frequency: TargetFrequency,
+        floor_text: str | None = None, stretch_text: str | None = None,
     ) -> HabitDefinition: ...
 
     async def list_active_habits(self, user_id: UUID) -> list[HabitDefinition]: ...
@@ -28,6 +29,7 @@ class HabitRepository(Protocol):
     async def update_habit(
         self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
         target_frequency: TargetFrequency | None = None,
+        tier_text: dict[str, str | None] | None = None,
     ) -> HabitDefinition | None: ...
 
     async def delete_log(self, user_id: UUID, habit_id: UUID, log_date: date) -> bool: ...
@@ -66,6 +68,7 @@ def _habit_from_orm(row: HabitDefinitionORM) -> HabitDefinition:
         target_frequency=_frequency_from_dict(row.target_frequency),
         created_at=row.created_at,
         archived_at=row.archived_at,
+        floor_text=row.floor_text, stretch_text=row.stretch_text,
     )
 
 
@@ -85,13 +88,15 @@ class SqlAlchemyHabitRepository:
         self._session = session
 
     async def create_habit(
-        self, user_id: UUID, name: str, target_frequency: TargetFrequency
+        self, user_id: UUID, name: str, target_frequency: TargetFrequency,
+        floor_text: str | None = None, stretch_text: str | None = None,
     ) -> HabitDefinition:
         now = datetime.now(timezone.utc)
         row = HabitDefinitionORM(
             user_id=user_id,
             name=name,
             target_frequency=_frequency_to_dict(target_frequency),
+            floor_text=floor_text, stretch_text=stretch_text,
             created_at=now,
             updated_at=now,
         )
@@ -127,6 +132,7 @@ class SqlAlchemyHabitRepository:
     async def update_habit(
         self, user_id: UUID, habit_id: UUID, name: str | None, archived: bool | None, now: datetime,
         target_frequency: TargetFrequency | None = None,
+        tier_text: dict[str, str | None] | None = None,
     ) -> HabitDefinition | None:
         stmt = select(HabitDefinitionORM).where(
             HabitDefinitionORM.id == habit_id, HabitDefinitionORM.user_id == user_id
@@ -142,6 +148,9 @@ class SqlAlchemyHabitRepository:
             row.archived_at = None
         if target_frequency is not None:
             row.target_frequency = _frequency_to_dict(target_frequency)
+        for key, value in (tier_text or {}).items():
+            if key in ("floor_text", "stretch_text"):
+                setattr(row, key, value)
         row.updated_at = now
         await self._session.flush()
         return _habit_from_orm(row)
