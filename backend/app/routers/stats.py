@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from app.deps import get_stats_service
 from app.ratelimit import rate_limit
 from app.routers.mappers import consistency_out
-from app.schemas import ChainDayOut, ChainOut, ConsistencyOut, PatternOut, PatternsOut
+from app.schemas import BounceRateOut, ChainDayOut, ChainOut, ConsistencyOut, PatternOut, PatternsOut
 from app.security import get_current_user_id
 from app.services.stats_service import StatsService
 
@@ -64,3 +64,18 @@ async def get_patterns(
             evidence_dates=p.evidence_dates, statement=p.statement,
         ) for p in patterns
     ])
+
+
+@router.get("/bounce-back", response_model=BounceRateOut)
+async def get_bounce_back(
+    end_date: date | None = Query(None),
+    window_days: int = Query(30, ge=7, le=90),
+    user_id: UUID = Depends(get_current_user_id),
+    service: StatsService = Depends(get_stats_service),
+) -> BounceRateOut:
+    """Of slip days old enough to judge, the share followed by a held day within 48h."""
+    end, rate = await service.bounce_rate(user_id, end_date, window_days)
+    return BounceRateOut(
+        end_date=end, window_days=window_days, slip_days=rate.slip_days,
+        returned_within_48h=rate.returned, rate_pct=rate.rate_pct,
+    )

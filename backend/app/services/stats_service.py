@@ -10,6 +10,9 @@ from app.repositories.screen_time_repository import ScreenTimeRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.repositories.study_repository import StudySessionRepository
 from app.repositories.urge_repository import UrgeRepository
+from app.services.bounce_back import (
+    LOOKBACK_DAYS, BounceRate, BounceState, classify_range, compute_bounce_rate, compute_bounce_state,
+)
 from app.services.chain_service import NONE, ChainDay, build_chain, study_states_by_day, urge_states_by_day
 from app.services.consistency_service import HabitConsistency, compute_habit_consistency, overall_consistency
 from app.services.pattern_service import Pattern, find_patterns
@@ -64,6 +67,28 @@ class StatsService:
             for h in habits
         ]
         return end, items, overall_consistency(items)
+
+    async def bounce_state(self, user_id: UUID, target_date: date | None) -> BounceState:
+        """Is `target_date` (default: the user's today) a bounce-back day, and how long was the slip?"""
+        target = await self._resolve_end(user_id, target_date)
+        habits = await self._habits.list_active_habits(user_id)
+        if not habits:
+            return BounceState(active=False)
+        start = target - timedelta(days=LOOKBACK_DAYS)
+        logs = await self._habits.get_logs_in_range(user_id, [h.id for h in habits], start, target - timedelta(days=1))
+        global_days, by_habit = await self._pause_sets(user_id, start, target)
+        return compute_bounce_state(habits, logs, target, global_days, by_habit)
+
+    async def bounce_rate(self, user_id: UUID, end_date: date | None, window_days: int) -> tuple[date, BounceRate]:
+        if not 7 <= window_days <= _MAX_WINDOW_DAYS:
+            raise ValidationError(f"window_days must be between 7 and {_MAX_WINDOW_DAYS}.")
+        end = await self._resolve_end(user_id, end_date)
+        habits = await self._habits.list_active_habits(user_id)
+        start = end - timedelta(days=window_days - 1)
+        logs = await self._habits.get_logs_in_range(user_id, [h.id for h in habits], start, end) if habits else []
+        global_days, by_habit = await self._pause_sets(user_id, start, end)
+        states = classify_range(habits, logs, start, end, global_days, by_habit)
+        return end, compute_bounce_rate(states, end)
 
     async def chain(self, user_id: UUID, end_date: date | None, days: int) -> tuple[date, list[ChainDay]]:
         if not 1 <= days <= _MAX_WINDOW_DAYS:
