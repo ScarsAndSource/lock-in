@@ -9,7 +9,7 @@ The unified daily check-in: habits + sleep + screen time in one confirm.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
@@ -25,6 +25,8 @@ from app.repositories.habit_repository import HabitRepository
 from app.repositories.screen_time_repository import ScreenTimeRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.security import FieldEncryptor
+from app.services.bounce_back import BOUNCE_REASON, INACTIVE, LOOKBACK_DAYS, BounceState, compute_bounce_state
+from app.services.pause_days import split_pause_days
 from app.services.defaults_service import compute_habit_defaults, compute_screen_time_default, compute_sleep_default
 
 _PROPOSAL_LOOKBACK_DAYS = 30
@@ -50,6 +52,8 @@ class CheckinEntry:
     is_low_confidence: bool
     reason: str
     is_scheduled: bool = True
+    floor_text: str | None = None
+    stretch_text: str | None = None
 
 
 @dataclass(slots=True)
@@ -74,6 +78,7 @@ class CheckinView:
     sleep_proposal: SleepProposal | None
     screen_log: ScreenTimeLog | None
     screen_proposal: ScreenTimeProposal | None
+    bounce: BounceState = field(default_factory=lambda: INACTIVE)
 
 
 @dataclass(slots=True)
@@ -88,7 +93,7 @@ class CheckinsService:
     def __init__(
         self, habit_repo: HabitRepository, checkin_repo: CheckinRepository, encryptor: FieldEncryptor,
         sleep_repo: SleepRepository, screen_repo: ScreenTimeRepository, clock: Clock = utc_now,
-        goals: GoalRepository | None = None, pauses=None,
+        goals: GoalRepository | None = None, pauses=None, bounce_enabled: bool = True,
     ):
         self._habits = habit_repo
         self._checkins = checkin_repo
@@ -98,6 +103,7 @@ class CheckinsService:
         self._clock = clock
         self._goals = goals
         self._pauses = pauses
+        self._bounce_enabled = bounce_enabled
 
     # ------------------------------------------------------------ read
     async def get_view(self, user_id: UUID, target_date: date) -> CheckinView:
@@ -105,13 +111,15 @@ class CheckinsService:
         existing = await self._checkins.get(user_id, target_date)
         sleep_log = await self._sleep.get_log(user_id, target_date)
         screen_log = await self._screen.get_log(user_id, target_date)
+        bounce = await self._bounce_state(user_id, habits, target_date)
         return CheckinView(
-            entries=await self._build_entries(user_id, habits, target_date),
+            entries=await self._build_entries(user_id, habits, target_date, bounce),
             already_confirmed=existing is not None and existing.confirmed_at is not None,
             sleep_log=sleep_log,
             sleep_proposal=None if sleep_log else await self._sleep_proposal(user_id, target_date),
             screen_log=screen_log,
             screen_proposal=None if screen_log else await self._screen_proposal(user_id, target_date),
+            bounce=bounce,
         )
 
     async def get_journal(self, user_id: UUID, target_date: date) -> str | None:
@@ -140,7 +148,8 @@ class CheckinsService:
         if unknown:
             raise NotFoundError(f"Override(s) reference habit(s) not found for this user: {unknown}")
 
-        proposed = await self._build_entries(user_id, habits, target_date)
+        bounce = await self._bounce_state(user_id, habits, target_date)
+        proposed = await self._build_entries(user_id, habits, target_date, bounce)
         audit: dict[str, dict] = {}
         final_entries: list[CheckinEntry] = []
 
@@ -174,6 +183,7 @@ class CheckinsService:
                 habit_id=entry.habit_id, habit_name=entry.habit_name, status=final_status,
                 is_default=is_default, is_low_confidence=entry.is_low_confidence,
                 reason=entry.reason, is_scheduled=entry.is_scheduled,
+                floor_text=entry.floor_text, stretch_text=entry.stretch_text,
             ))
 
         sleep_log, audit["_sleep"] = await self._resolve_sleep(user_id, target_date, sleep, accept_sleep_default)
@@ -276,7 +286,25 @@ class CheckinsService:
             return {h.id for h in habits}  # global pause: every habit rests
         return {p.habit_id for p in covering if p.habit_id is not None}
 
-    async def _build_entries(self, user_id: UUID, habits, target_date: date) -> list[CheckinEntry]:
+    async def _bounce_state(self, user_id: UUID, habits, target_date: date) -> BounceState:
+        """After a slip the day's unlogged proposals shrink to the floor. Off-switch: bounce_enabled=False."""
+        if not self._bounce_enabled or not habits:
+            return INACTIVE
+        start = target_date - timedelta(days=LOOKBACK_DAYS)
+        logs = await self._habits.get_logs_in_range(
+            user_id, [h.id for h in habits], start, target_date - timedelta(days=1)
+        )
+        global_days: frozenset[date] = frozenset()
+        by_habit: dict[UUID, frozenset[date]] = {}
+        if self._pauses is not None:
+            global_days, by_habit = split_pause_days(
+                await self._pauses.list_overlapping(user_id, start, target_date), start, target_date
+            )
+        return compute_bounce_state(habits, logs, target_date, global_days, by_habit)
+
+    async def _build_entries(
+        self, user_id: UUID, habits, target_date: date, bounce: BounceState = INACTIVE
+    ) -> list[CheckinEntry]:
         if not habits:
             return []
         paused = await self._paused_habit_ids(user_id, habits, target_date)
@@ -300,6 +328,7 @@ class CheckinsService:
                 entries.append(CheckinEntry(
                     habit_id=habit.id, habit_name=habit.name, status=log.status,
                     is_default=log.is_default, is_low_confidence=False, reason="Already logged for this date.",
+                    floor_text=habit.floor_text, stretch_text=habit.stretch_text,
                 ))
                 continue
             if habit.id in paused:
@@ -311,12 +340,21 @@ class CheckinsService:
                     is_low_confidence=False,
                     reason="Paused.",
                     is_scheduled=False,
+                    floor_text=habit.floor_text, stretch_text=habit.stretch_text,
                 ))
                 continue
             d = defaults[habit.id]
+            if bounce.active and d.is_scheduled:
+                entries.append(CheckinEntry(
+                    habit_id=habit.id, habit_name=habit.name, status=HabitStatus.FLOOR,
+                    is_default=True, is_low_confidence=False, reason=BOUNCE_REASON, is_scheduled=True,
+                    floor_text=habit.floor_text, stretch_text=habit.stretch_text,
+                ))
+                continue
             entries.append(CheckinEntry(
                 habit_id=habit.id, habit_name=habit.name, status=d.status,
                 is_default=d.is_scheduled,  # rest days are not "defaults to persist"
                 is_low_confidence=d.is_low_confidence, reason=d.reason, is_scheduled=d.is_scheduled,
+                floor_text=habit.floor_text, stretch_text=habit.stretch_text,
             ))
         return entries
