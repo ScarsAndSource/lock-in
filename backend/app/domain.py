@@ -15,6 +15,8 @@ class HabitStatus(str, Enum):
     DONE = "done"
     SKIPPED = "skipped"
     PARTIAL = "partial"
+    FLOOR = "floor"      # the minimum version that still counts
+    STRETCH = "stretch"  # beyond the usual target
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +61,8 @@ class HabitDefinition:
     target_frequency: TargetFrequency
     created_at: datetime
     archived_at: datetime | None = None
+    floor_text: str | None = None
+    stretch_text: str | None = None
 
     @property
     def is_active(self) -> bool:
@@ -399,6 +403,3 @@ class PushSubscription:
     created_at: datetime
     user_agent: str | None = None
     fail_count: int = 0
-
-
-
