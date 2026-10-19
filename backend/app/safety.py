@@ -73,15 +73,12 @@ def support_payload(timezone: str | None = None, region: str | None = None) -> d
 
 # ---------------------------------------------------------------- detection
 
-_DISTANCE_KMS = re.compile(r"(?:\d[\d.,]*|\b(?:few|some|many|several|couple of|x))\s*kms\b")
-
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
 
 
 def _normalize(text: str) -> str:
     t = unicodedata.normalize("NFKC", text[:5000]).lower()
     t = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", t)  # zero-width characters
-    t = _DISTANCE_KMS.sub(" km ", t)
     t = t.replace("'", "").replace("\u2019", "").replace("`", "")  # don't -> dont
     t = t.translate(_LEET)  # k1ll -> kill
     t = re.sub(r"(?<=[a-z])[!*#](?=[a-z])", "i", t)  # k*ll / k!ll -> kill
@@ -119,10 +116,15 @@ _PATTERNS = [re.compile(p) for p in (
 )]
 
 
+# "ran 5 kms" must not read as the slang "kms": leet-normalising turns the digit into a letter, so strip
+# number+unit distances BEFORE normalising. A bare "kms" still trips the screen.
+_DISTANCE = re.compile(r"\b\d+(?:[.,]\d+)?\s*kms?\b", re.IGNORECASE)
+
+
 def is_crisis(text: str | None) -> bool:
     if not text or not text.strip():
         return False
-    normalized = _normalize(text)
+    normalized = _normalize(_DISTANCE.sub(" ", text))
     return any(p.search(normalized) for p in _PATTERNS)
 
 

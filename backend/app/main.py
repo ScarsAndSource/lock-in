@@ -8,8 +8,6 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.datastructures import MutableHeaders
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.config import get_settings
 from app.db import engine, ping_database
@@ -41,6 +39,43 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Lock'in API", version="0.2.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    incoming = request.headers.get("x-request-id", "")
+    request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
+    request.state.request_id = request_id
+    length = request.headers.get("content-length", "")
+    limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
+    if length.isdigit() and int(length) > limit:
+        return JSONResponse(
+            status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
+        )
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers.setdefault("Cache-Control", "no-store")  # personal data: never cache
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
+# Added AFTER request_context so CORS is the outermost layer: early responses (413) get CORS headers too.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _cors_headers(request: Request) -> dict[str, str]:
+    """Starlette's outermost error layer sits outside CORSMiddleware, so a 500 would reach the browser as a CORS error."""
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_allow_origins:
+        return {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
+    return {}
+
 
 def _detail(code: int, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=code, content={"detail": str(exc)})
@@ -94,94 +129,9 @@ async def integrity_handler(request: Request, exc: DataIntegrityError) -> JSONRe
 async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception("Unhandled error request_id=%s path=%s", request_id, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Internal error.", "request_id": request_id})
-
-
-class BodyTooLargeError(Exception):
-    pass
-
-
-class RequestContextMiddleware:
-    def __init__(self, app: ASGIApp):
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        headers_dict = dict(scope.get("headers", []))
-        incoming = headers_dict.get(b"x-request-id", b"").decode("latin1")
-        request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
-        scope.setdefault("state", {})["request_id"] = request_id
-
-        path = scope.get("path", "")
-        limit = _UPLOAD_BODY_BYTES if path in _UPLOAD_PATHS else _MAX_BODY_BYTES
-        length = headers_dict.get(b"content-length", b"").decode("latin1")
-        if length.isdigit() and int(length) > limit:
-            response = JSONResponse(
-                status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
-            )
-            response.headers.setdefault("Cache-Control", "no-store")
-            response.headers.setdefault("X-Content-Type-Options", "nosniff")
-            await response(scope, receive, send)
-            return
-
-        received_bytes = 0
-        response_started = False
-
-        async def custom_send(message: Message) -> None:
-            nonlocal response_started
-            if message["type"] == "http.response.start":
-                response_started = True
-                m_headers = MutableHeaders(scope=message)
-                m_headers["X-Request-ID"] = request_id
-                m_headers.setdefault("Cache-Control", "no-store")
-                m_headers.setdefault("X-Content-Type-Options", "nosniff")
-            await send(message)
-
-        async def custom_receive() -> Message:
-            nonlocal received_bytes
-            message = await receive()
-            if message["type"] == "http.request":
-                body = message.get("body", b"")
-                received_bytes += len(body)
-                if received_bytes > limit:
-                    raise BodyTooLargeError()
-            return message
-
-        try:
-            await self.app(scope, custom_receive, custom_send)
-        except BodyTooLargeError:
-            if not response_started:
-                response = JSONResponse(
-                    status_code=413, content={"detail": "Request body too large."}, headers={"X-Request-ID": request_id},
-                )
-                response.headers.setdefault("Cache-Control", "no-store")
-                response.headers.setdefault("X-Content-Type-Options", "nosniff")
-                await response(scope, receive, send)
-            else:
-                raise
-        except Exception as exc:
-            if not response_started:
-                request = Request(scope)
-                response = await unhandled_handler(request, exc)
-                response.headers["X-Request-ID"] = request_id
-                response.headers.setdefault("Cache-Control", "no-store")
-                response.headers.setdefault("X-Content-Type-Options", "nosniff")
-                await response(scope, receive, send)
-            else:
-                raise
-
-
-app.add_middleware(RequestContextMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    return JSONResponse(
+        status_code=500, content={"detail": "Internal error.", "request_id": request_id}, headers=_cors_headers(request),
+    )
 
 
 @app.get("/health", tags=["meta"])
@@ -205,4 +155,3 @@ for module in (
     tasks, notifications, mood,
 ):
     app.include_router(module.router)
-

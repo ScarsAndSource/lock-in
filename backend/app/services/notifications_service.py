@@ -154,8 +154,8 @@ class NotificationsService:
             elif outcome is PushOutcome.GONE:
                 await self._repo.delete_subscription_by_id(user_id, sub.id)
                 live.remove(sub)
-            elif outcome is PushOutcome.TRANSIENT:
-                continue  # server/config/outage problem: says nothing about this device, never count it
+            elif outcome is PushOutcome.ERROR:
+                continue  # our misconfiguration or a local error: never punish the user's subscription
             else:
                 sub.fail_count += 1
                 if sub.fail_count >= MAX_FAILS_BEFORE_DROP:

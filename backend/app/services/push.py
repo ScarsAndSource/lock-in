@@ -22,9 +22,9 @@ logger = logging.getLogger("lockin.push")
 
 class PushOutcome(str, Enum):
     OK = "ok"
-    GONE = "gone"            # 404/410: the browser dropped the subscription -> delete it
-    FAILED = "failed"        # push service rejected THIS subscription (HTTP 400) -> count a strike
-    TRANSIENT = "transient"  # bad VAPID key, outage, 401/403/429/5xx, network -> keep, no strike
+    GONE = "gone"       # 404/410: the browser dropped the subscription -> delete it
+    FAILED = "failed"   # transient or unknown -> keep, count a failure, retry next run
+    ERROR = "error"     # OUR side (bad VAPID key, 401/403/413, local exception) -> keep, never count against the user
 
 
 class PushSender(Protocol):
@@ -56,7 +56,7 @@ class WebPushSender:
 
     async def send(self, sub: PushSubscription, payload: dict) -> PushOutcome:
         if not self.configured:
-            return PushOutcome.TRANSIENT
+            return PushOutcome.FAILED
         return await asyncio.to_thread(self._send_sync, sub, json.dumps(payload))
 
     def _send_sync(self, sub: PushSubscription, data: str) -> PushOutcome:
@@ -76,11 +76,14 @@ class WebPushSender:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (404, 410):
                 return PushOutcome.GONE
+            if status in (401, 403, 413):
+                logger.error("push rejected (HTTP %s): check the VAPID keys / payload size", status)
+                return PushOutcome.ERROR
             logger.warning("push failed (HTTP %s)", status)
-            return PushOutcome.FAILED if status == 400 else PushOutcome.TRANSIENT
+            return PushOutcome.FAILED
         except Exception:  # noqa: BLE001 -- a bad key / network error must never crash the whole run
-            logger.warning("push failed (%s)", "unexpected error")
-            return PushOutcome.TRANSIENT
+            logger.exception("push failed locally (bad VAPID key or network); subscription kept")
+            return PushOutcome.ERROR
 
 
 class DisabledSender:
@@ -88,4 +91,4 @@ class DisabledSender:
     configured = False
 
     async def send(self, sub: PushSubscription, payload: dict) -> PushOutcome:
-        return PushOutcome.TRANSIENT
+        return PushOutcome.FAILED
