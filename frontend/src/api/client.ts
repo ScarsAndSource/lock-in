@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE: string =
+  import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 export function isNotFound(err: unknown): boolean {
   return err instanceof ApiError && err.status === 404;
@@ -50,17 +51,32 @@ export function setAuthToken(token: string | null): void {
   }
 }
 
+/** Demo (local mock data) is opt-in. A visitor with no session sees the login screen, never fake data. */
 export function isDemoMode(): boolean {
-  const pref = localStorage.getItem('lockin_demo_mode');
-  return pref === null ? !getAuthToken() : pref === 'true';
+  return localStorage.getItem('lockin_demo_mode') === 'true';
 }
 
 export function setDemoMode(demo: boolean): void {
   localStorage.setItem('lockin_demo_mode', String(demo));
 }
 
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
+/**
+ * Hooks registered by api/auth.ts (kept out of this file to avoid a circular import).
+ *   refresh -> a new access token, null when the session is definitively dead, or it throws on a network error.
+ *   onLost  -> the session is gone: clear it and return to the login screen.
+ */
+interface AuthHooks {
+  refresh: () => Promise<string | null>;
+  onLost: () => void;
+}
+
+let authHooks: AuthHooks | null = null;
+
+export function registerAuthHooks(hooks: AuthHooks): void {
+  authHooks = hooks;
+}
+
+async function send(path: string, options: RequestInit, token: string | null): Promise<Response> {
   const headers = new Headers(options.headers || {});
   const method = (options.method || 'GET').toUpperCase();
 
@@ -77,12 +93,28 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   }
 
   const url = `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+  return fetch(url, { ...options, headers });
+}
 
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
-    const res = await fetch(url, {
-      ...options,
-      headers,
-    });
+    const token = getAuthToken();
+    let res = await send(path, options, token);
+
+    // An expired access token: refresh once and replay the request. A dead session sends the user to login.
+    if (res.status === 401 && token && authHooks) {
+      let fresh: string | null | undefined;
+      try {
+        fresh = await authHooks.refresh();
+      } catch {
+        fresh = undefined; // offline / auth service down: keep the session, surface the 401
+      }
+      if (fresh) {
+        res = await send(path, options, fresh);
+      } else if (fresh === null) {
+        authHooks.onLost();
+      }
+    }
 
     if (res.status === 204) {
       return undefined as T;

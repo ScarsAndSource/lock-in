@@ -13,9 +13,11 @@ import {
 import { Profile, Intention, MissionDetail, Domain } from '../types';
 import { errorMessage } from '../lib/format';
 import { NotificationSettings } from '../components/NotificationSettings';
+import { signOut } from '../api/auth';
+import { API_BASE } from '../api/client';
 
 export const MoreView: React.FC = () => {
-  const { demoMode, toggleDemoMode, token, saveToken, showToast } = useApp();
+  const { demoMode, toggleDemoMode, showToast } = useApp();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [intentions, setIntentions] = useState<Intention[]>([]);
@@ -23,7 +25,6 @@ export const MoreView: React.FC = () => {
 
   // Form states
   const [timezoneInput, setTimezoneInput] = useState('Asia/Kolkata');
-  const [tokenInput, setTokenInput] = useState(token || '');
   const [cueInput, setCueInput] = useState('');
   const [actionInput, setActionInput] = useState('');
   const [domainInput, setDomainInput] = useState<Domain>('habit');
@@ -47,11 +48,6 @@ export const MoreView: React.FC = () => {
     } catch (err: unknown) {
       showToast(errorMessage(err, 'Error updating timezone'));
     }
-  };
-
-  const handleSaveToken = (e: React.FormEvent) => {
-    e.preventDefault();
-    saveToken(tokenInput.trim() || null);
   };
 
   const handleCreateIntention = async (e: React.FormEvent) => {
@@ -255,7 +251,7 @@ export const MoreView: React.FC = () => {
           <div>
             <span className="font-small-medium text-ink block font-semibold">Active Mode</span>
             <span className="font-caption text-caption text-muted-text">
-              {demoMode ? 'Local Demo & Mock Data' : 'Live FastAPI Backend (http://localhost:8000)'}
+              {demoMode ? 'Local Demo & Mock Data' : `Live backend (${API_BASE || 'same origin'})`}
             </span>
           </div>
           <button
@@ -263,28 +259,21 @@ export const MoreView: React.FC = () => {
             onClick={() => toggleDemoMode(!demoMode)}
             className="px-3 py-1.5 rounded-lg font-caption text-caption font-semibold bg-ink text-ground-chalk hover:bg-secondary transition-colors"
           >
-            {demoMode ? 'Switch to Live' : 'Switch to Demo'}
+            {demoMode ? 'Sign in' : 'Switch to Demo'}
           </button>
         </div>
 
-        <form onSubmit={handleSaveToken} className="space-y-2 pt-1">
-          <label className="font-caption text-caption text-muted-text block">
-            Supabase Bearer Token (Optional for live authenticated requests)
-          </label>
-          <input
-            type="password"
-            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-            className="w-full bg-surface-container-low border border-line rounded-lg px-3 py-2 font-small text-ink"
-          />
+        {!demoMode && (
           <button
-            type="submit"
+            type="button"
+            onClick={() => {
+              void signOut();
+            }}
             className="w-full h-9 bg-surface-container text-ink border border-line rounded-lg font-caption text-caption font-semibold hover:bg-secondary-fixed transition-colors"
           >
-            Save Token
+            Sign out
           </button>
-        </form>
+        )}
       </section>
 
       <NotificationSettings />

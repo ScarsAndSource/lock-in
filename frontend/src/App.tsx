@@ -5,6 +5,7 @@ import { BottomNav } from './components/BottomNav';
 import { CheckinModal } from './components/CheckinModal';
 import { UrgeQuickModal } from './components/UrgeQuickModal';
 import { Toast } from './components/Toast';
+import { LoginScreen } from './components/LoginScreen';
 import { TodayView } from './views/TodayView';
 import { TrackView } from './views/TrackView';
 import { ReviewView } from './views/ReviewView';
@@ -19,6 +20,8 @@ export const AppContent: React.FC = () => {
     setCheckinModalOpen,
     urgeQuickModalOpen,
     setUrgeQuickModalOpen,
+    demoMode,
+    token,
   } = useApp();
 
   const getTitle = () => {
@@ -37,6 +40,11 @@ export const AppContent: React.FC = () => {
         return 'Lock’in';
     }
   };
+
+  // Live mode with no session: login first. Demo mode is an explicit opt-in from the login screen.
+  if (!demoMode && !token) {
+    return <LoginScreen />;
+  }
 
   return (
     <div className="bg-ground-chalk font-body-default text-ink flex flex-col min-h-screen">

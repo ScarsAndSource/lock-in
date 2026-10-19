@@ -2,7 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { AppProvider } from './context/AppContext';
 import { AppContent } from './App';
+import { startAuth } from './api/auth';
 import './index.css';
+
+// Adopt a session from an email-confirmation / magic link and register token refresh BEFORE anything renders.
+startAuth();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

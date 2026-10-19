@@ -46,6 +46,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [dataEpoch, setDataEpoch] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const checkinSeq = useRef(0);
 
   const bumpData = useCallback(() => setDataEpoch((n) => n + 1), []);
 
@@ -71,22 +72,31 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const refreshCheckinView = useCallback(async () => {
+    if (!isDemoMode() && !getAuthToken()) {
+      setCheckinView(null); // signed out: the login screen is showing, nothing to load
+      return;
+    }
+    // Responses can arrive out of order (the profile fetch changes activeDate mid-flight); only the latest counts.
+    const seq = ++checkinSeq.current;
     setCheckinLoading(true);
     try {
       const view = await getCheckinDefaults(activeDate);
+      if (seq !== checkinSeq.current) return;
       setCheckinView(view);
     } catch (err) {
+      if (seq !== checkinSeq.current) return;
       setCheckinView(null);
       if (!isDemoMode()) {
         showToast(errorMessage(err, 'Could not load today’s check-in'));
       }
     } finally {
-      setCheckinLoading(false);
+      if (seq === checkinSeq.current) setCheckinLoading(false);
     }
   }, [activeDate, showToast]);
 
   useEffect(() => {
     let cancelled = false;
+    if (!isDemoMode() && !getAuthToken()) return; // signed out: nothing to load
     (async () => {
       try {
         const p = await getProfile();

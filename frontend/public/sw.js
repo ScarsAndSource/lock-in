@@ -48,6 +48,7 @@ self.addEventListener('fetch', (event) => {
         if (event.request.mode === 'navigate') {
           return caches.match('/index.html');
         }
+        return Response.error();
       });
     })
   );
@@ -81,7 +82,9 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const client of windows) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          return client.focus().then((focused) => (focused && 'navigate' in focused ? focused.navigate(url) : focused));
+        }
       }
       return self.clients.openWindow(url);
     })
