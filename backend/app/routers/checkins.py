@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from app.deps import get_checkins_service, get_profile_service
 from app.ratelimit import rate_limit
 from app.routers.mappers import (
-    bounce_out, entry_out, screen_out, screen_proposal_out, sleep_out, sleep_proposal_out,
+    bounce_out, entry_out, mood_out, screen_out, screen_proposal_out, sleep_out, sleep_proposal_out,
 )
 from app.safety import is_crisis, support_payload
 from app.schemas import (
@@ -39,6 +39,7 @@ async def get_checkin_defaults(
             logged=screen_out(view.screen_log), proposal=screen_proposal_out(view.screen_proposal)
         ),
         bounce=bounce_out(view.bounce, (await profiles.get(user_id)).tone_preference),
+        mood=mood_out(view.mood_log),
     )
 
 
@@ -63,6 +64,7 @@ async def confirm_checkin(
         )
         if body.screen_time
         else None,
+        mood=(body.mood.valence, body.mood.energy) if body.mood else None,
         accept_sleep_default=body.accept_sleep_default,
         accept_screen_time_default=body.accept_screen_time_default,
     )
@@ -77,6 +79,7 @@ async def confirm_checkin(
         entries=[entry_out(e) for e in result.entries],
         sleep=sleep_out(result.sleep_log),
         screen_time=screen_out(result.screen_log),
+        mood=mood_out(result.mood_log),
         support=support,
     )
 

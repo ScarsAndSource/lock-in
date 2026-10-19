@@ -266,7 +266,9 @@ class LlmUsageORM(Base):
     __tablename__ = "llm_usage"
     __table_args__ = (
         UniqueConstraint("user_id", "usage_date", "feature", name="llm_usage_user_day_feature"),
-        CheckConstraint("feature in ('chat', 'retro', 'insight', 'tasks')", name="llm_usage_feature_check"),
+        CheckConstraint(
+            "feature in ('chat', 'retro', 'insight', 'tasks', 'media')", name="llm_usage_feature_check"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -276,6 +278,25 @@ class LlmUsageORM(Base):
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MoodLogORM(Base):
+    __tablename__ = "mood_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "log_date", name="mood_logs_user_id_log_date_key"),
+        CheckConstraint("valence between 1 and 5", name="mood_logs_valence_check"),
+        CheckConstraint("energy between 1 and 5", name="mood_logs_energy_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    log_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    valence: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    energy: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PauseORM(Base):
     __tablename__ = "pauses"
 

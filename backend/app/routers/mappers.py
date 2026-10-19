@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from app.domain import HabitDefinition, Mission, ScreenTimeLog, ScreenTimeProposal, SleepLog, SleepProposal
+from app.domain import HabitDefinition, Mission, MoodLog, ScreenTimeLog, ScreenTimeProposal, SleepLog, SleepProposal
 from app.schemas import (
-    BounceOut, CheckinEntryOut, HabitConsistencyOut, HabitOut, MissionOut,
+    BounceOut, CheckinEntryOut, HabitConsistencyOut, HabitOut, MissionOut, MoodLogOut,
     ScreenTimeLogOut, ScreenTimeProposalOut, SleepLogOut, SleepProposalOut,
 )
 from app.services.bounce_back import BounceState, bounce_copy
@@ -82,3 +82,9 @@ def bounce_out(state: BounceState, tone_preference: str) -> BounceOut:
         active=state.active, slip_streak=state.slip_streak, tone=tone,
         title=copy[0] if copy else None, message=copy[1] if copy else None,
     )
+
+
+def mood_out(log: MoodLog | None) -> MoodLogOut | None:
+    if log is None:
+        return None
+    return MoodLogOut(log_date=log.log_date, valence=log.valence, energy=log.energy)

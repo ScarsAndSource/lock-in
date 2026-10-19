@@ -140,6 +140,18 @@ class ScreenTimeLogOut(BaseModel):
     is_default: bool = False
 
 
+# ---------------------------------------------------------------- mood
+class MoodEntryIn(BaseModel):
+    valence: Annotated[int, Field(ge=1, le=5)]  # how it felt
+    energy: Annotated[int, Field(ge=1, le=5)]   # how much energy
+
+
+class MoodLogOut(BaseModel):
+    log_date: date
+    valence: int
+    energy: int
+
+
 # ---------------------------------------------------------------- check-in
 class CheckinEntryOut(BaseModel):
     habit_id: UUID
@@ -195,6 +207,7 @@ class CheckinViewOut(BaseModel):
     sleep: SleepSectionOut
     screen_time: ScreenTimeSectionOut
     bounce: BounceOut = Field(default_factory=BounceOut)
+    mood: MoodLogOut | None = None
 
 
 class CheckinOverrideIn(BaseModel):
@@ -229,6 +242,7 @@ class CheckinConfirmRequest(BaseModel):
     journal_text: Annotated[str | None, Field(max_length=10_000)] = None
     sleep: SleepEntryIn | None = None
     screen_time: ScreenTimeEntryIn | None = None
+    mood: MoodEntryIn | None = None  # None = leave any existing mood untouched
     accept_sleep_default: bool = True
     accept_screen_time_default: bool = True
 
@@ -247,6 +261,7 @@ class CheckinConfirmOut(BaseModel):
     entries: list[CheckinEntryOut]
     sleep: SleepLogOut | None
     screen_time: ScreenTimeLogOut | None
+    mood: MoodLogOut | None = None
     support: SupportOut | None = None  # present only when the journal/notes tripped the crisis screen
 
 

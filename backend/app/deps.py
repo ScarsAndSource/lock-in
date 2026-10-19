@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
-from app.db import AsyncSessionLocal, get_db
+from app.db import get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
@@ -14,6 +14,7 @@ from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
+from app.repositories.mood_repository import SqlAlchemyMoodRepository
 from app.repositories.notification_repository import SqlAlchemyNotificationRepository
 from app.repositories.pause_repository import SqlAlchemyPauseRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
@@ -34,6 +35,7 @@ from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
 from app.services.llm import BudgetedLLM, GroqClient, LLMClient, scoped
 from app.services.missions_service import MissionsService
+from app.services.mood_service import MoodService
 from app.services.notifications_service import NotificationsService
 from app.services.pauses_service import PausesService
 from app.services.pause_shortcuts_service import PauseShortcutsService
@@ -89,8 +91,8 @@ def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchem
     return SqlAlchemyInsightRepository(session)
 
 
-def get_llm_usage_repository(settings: Settings = Depends(get_settings)) -> SqlAlchemyLlmUsageRepository:
-    return SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced)
+def get_llm_usage_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyLlmUsageRepository:
+    return SqlAlchemyLlmUsageRepository(session)
 
 
 def get_chat_thread_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyChatThreadRepository:
@@ -130,6 +132,17 @@ def get_habits_service(
     return HabitsService(habit_repo, clock)
 
 
+def get_mood_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyMoodRepository:
+    return SqlAlchemyMoodRepository(session)
+
+
+def get_mood_service(
+    repo: SqlAlchemyMoodRepository = Depends(get_mood_repository),
+    clock: Clock = Depends(get_clock),
+) -> MoodService:
+    return MoodService(repo, clock)
+
+
 def get_checkins_service(
     habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
     checkin_repo: SqlAlchemyCheckinRepository = Depends(get_checkin_repository),
@@ -139,9 +152,11 @@ def get_checkins_service(
     clock: Clock = Depends(get_clock),
     goal_repo: SqlAlchemyGoalRepository = Depends(get_goal_repository),
     pause_repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    mood_repo: SqlAlchemyMoodRepository = Depends(get_mood_repository),
 ) -> CheckinsService:
     return CheckinsService(
         habit_repo, checkin_repo, encryptor, sleep_repo, screen_repo, clock, goals=goal_repo, pauses=pause_repo,
+        mood_repo=mood_repo,
     )
 
 
@@ -207,8 +222,6 @@ def get_llm_client(
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
-        transcribe_model=settings.groq_transcribe_model,
-        vision_model=settings.groq_vision_model,
     )
     return BudgetedLLM(inner, usage, user_id, settings.llm_daily_call_cap, "chat", clock)
 

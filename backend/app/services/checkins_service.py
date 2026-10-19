@@ -1,10 +1,11 @@
 """
-The unified daily check-in: habits + sleep + screen time in one confirm.
+The unified daily check-in: habits + sleep + screen time (+ mood) in one confirm.
 
   - Rest days (not scheduled) propose nothing and write nothing.
   - Sleep/screen proposals are persisted only if accepted (default: accepted),
     flagged is_default=True, and never used as the basis for future proposals.
   - journal_text: None keeps the existing journal, "" clears it, text replaces it.
+  - mood: None keeps any existing mood for the day.
   - Everything runs in the request's single DB transaction (see db.py).
 """
 from __future__ import annotations
@@ -15,13 +16,14 @@ from uuid import UUID
 
 from app.dates import Clock, assert_loggable_date, utc_now
 from app.domain import (
-    DailyCheckin, GoalStatus, HabitLog, HabitStatus, ScreenTimeLog, ScreenTimeProposal,
+    DailyCheckin, GoalStatus, HabitLog, HabitStatus, MoodLog, ScreenTimeLog, ScreenTimeProposal,
     ScreenTimeSource, SleepLog, SleepProposal,
 )
-from app.exceptions import DataIntegrityError, NotFoundError
+from app.exceptions import DataIntegrityError, NotFoundError, ValidationError
 from app.repositories.checkin_repository import CheckinRepository
 from app.repositories.goal_repository import GoalRepository
 from app.repositories.habit_repository import HabitRepository
+from app.repositories.mood_repository import MoodRepository
 from app.repositories.screen_time_repository import ScreenTimeRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.security import FieldEncryptor
@@ -79,6 +81,7 @@ class CheckinView:
     screen_log: ScreenTimeLog | None
     screen_proposal: ScreenTimeProposal | None
     bounce: BounceState = field(default_factory=lambda: INACTIVE)
+    mood_log: MoodLog | None = None
 
 
 @dataclass(slots=True)
@@ -87,6 +90,7 @@ class ConfirmResult:
     confirmed_at: datetime
     sleep_log: SleepLog | None
     screen_log: ScreenTimeLog | None
+    mood_log: MoodLog | None = None
 
 
 class CheckinsService:
@@ -94,6 +98,7 @@ class CheckinsService:
         self, habit_repo: HabitRepository, checkin_repo: CheckinRepository, encryptor: FieldEncryptor,
         sleep_repo: SleepRepository, screen_repo: ScreenTimeRepository, clock: Clock = utc_now,
         goals: GoalRepository | None = None, pauses=None, bounce_enabled: bool = True,
+        mood_repo: MoodRepository | None = None,
     ):
         self._habits = habit_repo
         self._checkins = checkin_repo
@@ -104,6 +109,7 @@ class CheckinsService:
         self._goals = goals
         self._pauses = pauses
         self._bounce_enabled = bounce_enabled
+        self._mood = mood_repo
 
     # ------------------------------------------------------------ read
     async def get_view(self, user_id: UUID, target_date: date) -> CheckinView:
@@ -120,6 +126,7 @@ class CheckinsService:
             screen_log=screen_log,
             screen_proposal=None if screen_log else await self._screen_proposal(user_id, target_date),
             bounce=bounce,
+            mood_log=await self._mood.get_log(user_id, target_date) if self._mood is not None else None,
         )
 
     async def get_journal(self, user_id: UUID, target_date: date) -> str | None:
@@ -138,6 +145,7 @@ class CheckinsService:
         journal_text: str | None,
         sleep: SleepInput | None = None,
         screen_time: ScreenTimeInput | None = None,
+        mood: tuple[int, int] | None = None,  # (valence, energy); None keeps any existing mood
         accept_sleep_default: bool = True,
         accept_screen_time_default: bool = True,
     ) -> ConfirmResult:
@@ -190,6 +198,7 @@ class CheckinsService:
         screen_log, audit["_screen_time"] = await self._resolve_screen(
             user_id, target_date, screen_time, accept_screen_time_default
         )
+        mood_log = await self._resolve_mood(user_id, target_date, mood)
 
         existing = await self._checkins.get(user_id, target_date)
         if journal_text is None:
@@ -201,9 +210,20 @@ class CheckinsService:
             user_id=user_id, checkin_date=target_date, journal_encrypted=journal_bytes,
             defaults_applied=audit, confirmed_at=self._clock(),
         ))
-        return ConfirmResult(final_entries, saved.confirmed_at or self._clock(), sleep_log, screen_log)
+        return ConfirmResult(final_entries, saved.confirmed_at or self._clock(), sleep_log, screen_log, mood_log)
 
     # ------------------------------------------------------------ helpers
+    async def _resolve_mood(self, user_id: UUID, target_date: date, given: tuple[int, int] | None) -> MoodLog | None:
+        if self._mood is None:
+            return None
+        if given is None:
+            return await self._mood.get_log(user_id, target_date)
+        try:
+            log = MoodLog(user_id=user_id, log_date=target_date, valence=given[0], energy=given[1])
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return await self._mood.upsert_log(log)
+
     async def _resolve_sleep(self, user_id, target_date, given: SleepInput | None, accept_default: bool):
         existing = await self._sleep.get_log(user_id, target_date)
         if given is not None:

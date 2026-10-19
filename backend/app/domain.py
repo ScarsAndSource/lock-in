@@ -171,6 +171,21 @@ class ScreenTimeProposal:
 
 
 @dataclass(slots=True)
+class MoodLog:
+    """One row per user per day: two 1-5 taps (how it felt, how much energy)."""
+    user_id: UUID
+    log_date: date
+    valence: int
+    energy: int
+
+    def __post_init__(self):
+        if not 1 <= self.valence <= 5:
+            raise ValueError("valence must be between 1 and 5")
+        if not 1 <= self.energy <= 5:
+            raise ValueError("energy must be between 1 and 5")
+
+
+@dataclass(slots=True)
 class Profile:
     user_id: UUID
     timezone: str
