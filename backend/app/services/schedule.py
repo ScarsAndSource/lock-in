@@ -15,7 +15,10 @@ from datetime import date, timedelta
 
 from app.domain import HabitLog, HabitStatus, TargetFrequency
 
-_CREDIT = {HabitStatus.DONE: 1.0, HabitStatus.PARTIAL: 0.5, HabitStatus.SKIPPED: 0.0}
+_CREDIT = {
+    HabitStatus.STRETCH: 1.0, HabitStatus.DONE: 1.0, HabitStatus.FLOOR: 0.75,
+    HabitStatus.PARTIAL: 0.5, HabitStatus.SKIPPED: 0.0,
+}
 
 
 def credit(status: HabitStatus) -> float:
