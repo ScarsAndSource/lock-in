@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     groq_api_key: str = ""  # empty => every narration falls back to deterministic text
     groq_model: str = "llama-3.3-70b-versatile"  # check Groq's current model list before deploy
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    groq_timeout_seconds: float = Field(default=20.0, gt=0, le=60)
+    groq_timeout_seconds: float = Field(default=10.0, gt=0, le=60)  # a request holds its DB connection while Groq answers: keep this short
+    groq_max_retries: int = Field(default=0, ge=0, le=2)  # transport-level retries per Groq call; 0 = one attempt, fall back fast
     groq_transcribe_model: str = "whisper-large-v3-turbo"  # voice check-in; check Groq's current model list
     groq_vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"  # screenshot screen time; same advice
     max_audio_bytes: int = Field(default=4_000_000, ge=10_000)

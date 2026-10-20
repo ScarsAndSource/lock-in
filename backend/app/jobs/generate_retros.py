@@ -123,6 +123,7 @@ async def run_once(llm: LLMClient | None = None, clock: Clock = utc_now) -> dict
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
+        max_retries=settings.groq_max_retries,
         transcribe_model=settings.groq_transcribe_model,
         vision_model=settings.groq_vision_model,
     )
