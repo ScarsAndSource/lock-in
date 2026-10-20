@@ -5,7 +5,12 @@ import { addDaysISO, localTodayISO, qs } from '../lib/dates';
 
 export async function getConsistency(window_days: number = 30, endDate?: string): Promise<ConsistencyOut> {
   if (isDemoMode()) {
-    return { ...INITIAL_CONSISTENCY, end_date: endDate || localTodayISO(), window_days };
+    // The live API reports comeback_rate as 0-100; the mock stores a 0-1 fraction.
+    const habits = INITIAL_CONSISTENCY.habits.map((h) => ({
+      ...h,
+      comeback_rate: h.comeback_rate === null ? null : Math.round(h.comeback_rate * 1000) / 10,
+    }));
+    return { ...INITIAL_CONSISTENCY, habits, end_date: endDate || localTodayISO(), window_days };
   }
   return request<ConsistencyOut>(`/stats/consistency${qs({ window_days, end_date: endDate })}`);
 }
