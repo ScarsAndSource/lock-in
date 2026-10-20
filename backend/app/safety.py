@@ -118,7 +118,7 @@ _PATTERNS = [re.compile(p) for p in (
 
 # "ran 5 kms" must not read as the slang "kms": leet-normalising turns the digit into a letter, so strip
 # number+unit distances BEFORE normalising. A bare "kms" still trips the screen.
-_DISTANCE = re.compile(r"\b\d+(?:[.,]\d+)?\s*kms?\b", re.IGNORECASE)
+_DISTANCE = re.compile(r"\b(?:\d+(?:[.,]\d+)?|(?:a )?(?:few|couple(?: of)?|several|some|many))\s*kms?\b", re.IGNORECASE)
 
 
 def is_crisis(text: str | None) -> bool:

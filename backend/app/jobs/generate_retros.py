@@ -106,7 +106,7 @@ async def _run_user(user_id: UUID, inner_llm: LLMClient, settings: Settings, clo
                 await apply_rls_context(session, user_id)
             llm = BudgetedLLM(
                 inner_llm,
-                SqlAlchemyLlmUsageRepository(session),
+                SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced),
                 user_id,
                 settings.llm_daily_call_cap,
                 "retro",
@@ -123,6 +123,8 @@ async def run_once(llm: LLMClient | None = None, clock: Clock = utc_now) -> dict
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
+        transcribe_model=settings.groq_transcribe_model,
+        vision_model=settings.groq_vision_model,
     )
     counts = {"users": 0, "retros": 0, "errors": 0}
     for user_id in await active_user_ids(clock):

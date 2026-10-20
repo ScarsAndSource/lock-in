@@ -1,7 +1,11 @@
 """
 Startup guard against ORM <-> SQL drift (there's no Alembic yet). Compares every
-ORM table's column names to the live database. 'warn' logs loudly and keeps
-booting; 'strict' refuses to start.
+ORM table's column names to the live database, in BOTH directions:
+  - an ORM column the database lacks (migration not applied), and
+  - a NOT NULL column with no default that the ORM doesn't know about (every insert would fail).
+'warn' logs loudly and keeps booting; 'strict' refuses to start.
+(The remaining drift -- code passing a column the ORM class doesn't define -- is caught by
+tests/test_orm_parity.py, which needs no database.)
 """
 from __future__ import annotations
 
@@ -28,6 +32,21 @@ def _diff(sync_conn) -> list[str]:
         db_cols = {c["name"] for c in insp.get_columns(table.name, schema=schema)}
         for col in sorted({c.name for c in table.columns} - db_cols):
             problems.append(f"{schema}.{table.name} is missing column {col!r} (migration not applied?)")
+        orm_cols = {c.name for c in table.columns}
+        for c in insp.get_columns(table.name, schema=schema):
+            if c["name"] in orm_cols:
+                continue
+            required = (
+                not c.get("nullable", True)
+                and c.get("default") is None
+                and not c.get("autoincrement")
+                and not c.get("identity")
+            )
+            if required:
+                problems.append(
+                    f"{schema}.{table.name}.{c['name']} is NOT NULL with no default but the ORM model "
+                    "doesn't define it (inserts will fail)"
+                )
     return problems
 
 

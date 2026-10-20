@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.exceptions import ValidationError
 from app.repositories.habit_repository import HabitRepository
@@ -20,6 +21,17 @@ from app.services.pause_days import split_pause_days
 from app.services.profile_service import ProfileService
 
 _MAX_WINDOW_DAYS = 400
+
+
+def _local_day(moment: datetime, tz_name: str) -> date:
+    """The calendar day `moment` falls on in the user's timezone (UTC if the name is unknown)."""
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        tz = ZoneInfo("UTC")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(tz).date()
 
 
 class StatsService:
@@ -62,8 +74,12 @@ class StatsService:
         start = end - timedelta(days=window_days - 1)
         logs = await self._habits.get_logs_in_range(user_id, [h.id for h in habits], start, end)
         global_days, by_habit = await self._pause_sets(user_id, start, end)
+        tz_name = (await self._profiles.get(user_id)).timezone
         items = [
-            compute_habit_consistency(h, logs, end, window_days, global_days | by_habit.get(h.id, frozenset()))
+            compute_habit_consistency(
+                h, logs, end, window_days, global_days | by_habit.get(h.id, frozenset()),
+                habit_start=_local_day(h.created_at, tz_name),
+            )
             for h in habits
         ]
         return end, items, overall_consistency(items)

@@ -74,3 +74,28 @@ def test_auto_filled_default_logs_do_not_count_toward_consistency():
     assert r.earned == 0.0
     assert r.consistency_pct == 0.0
     assert r.logged_days == 0
+
+
+def test_new_habit_is_only_judged_from_its_first_day():
+    habit = _habit(TargetFrequency(type="weekdays", days=(0, 1, 2, 3, 4, 5, 6)))
+    today = date(2026, 9, 27)
+    logs = [_log(habit, today)]
+    before = compute_habit_consistency(habit, logs, end_date=today, window_days=30)
+    assert before.consistency_pct == 3.3          # the old bug: 29 days before it existed counted as misses
+    after = compute_habit_consistency(habit, logs, end_date=today, window_days=30, habit_start=today)
+    assert after.consistency_pct == 100.0 and after.expected == 1.0 and after.coverage_pct == 100.0
+
+
+def test_new_n_per_week_habit_is_not_scored_against_older_days():
+    habit = _habit(TargetFrequency(type="n_per_week", count=3))
+    today = date(2026, 9, 27)
+    logs = [_log(habit, today)]
+    r = compute_habit_consistency(habit, logs, end_date=today, window_days=30, habit_start=today)
+    assert r.consistency_pct == 100.0 and r.coverage_pct == 100.0
+
+
+def test_backfilled_logs_before_creation_still_count():
+    habit = _habit(TargetFrequency(type="weekdays", days=(0, 1, 2, 3, 4, 5, 6)))
+    logs = [_log(habit, date(2026, 9, 25)), _log(habit, date(2026, 9, 26)), _log(habit, date(2026, 9, 27))]
+    r = compute_habit_consistency(habit, logs, end_date=date(2026, 9, 27), window_days=30, habit_start=date(2026, 9, 27))
+    assert r.expected == 3.0 and r.consistency_pct == 100.0

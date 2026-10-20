@@ -278,6 +278,7 @@ class LlmUsageORM(Base):
     calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class MoodLogORM(Base):
@@ -308,6 +309,7 @@ class PauseORM(Base):
         PGUUID(as_uuid=True), ForeignKey("habit_definitions.id", ondelete="CASCADE"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class TaskORM(Base):

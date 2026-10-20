@@ -13,6 +13,10 @@ percentage; it never wipes a counter.
                    rewards bouncing back instead of punishing the dip.
 
 If end_date is itself a scheduled day not yet logged, it's PENDING, not a miss.
+
+A habit is only judged from the day it started existing: the window is clamped to `habit_start`
+(the habit's creation day in the user's timezone), or to the earliest real log if the user backfilled
+before that. Days before the habit existed are neither misses nor expected credit.
 """
 from __future__ import annotations
 
@@ -56,6 +60,7 @@ def compute_habit_consistency(
     end_date: date,
     window_days: int,
     paused_days: frozenset[date] = frozenset(),
+    habit_start: date | None = None,
 ) -> HabitConsistency:
     if window_days < 1:
         raise ValueError("window_days must be >= 1")
@@ -65,6 +70,10 @@ def compute_habit_consistency(
         for l in logs
         if l.habit_id == habit.id and not l.is_default and start <= l.log_date <= end_date
     }
+    if habit_start is not None:
+        # Judge the habit only from the day it began (or its earliest real log, if backfilled earlier).
+        began = min([habit_start, *by_date]) if by_date else habit_start
+        start = max(start, min(began, end_date))
     if habit.target_frequency.type == "weekdays":
         return _weekdays(habit, by_date, start, end_date, window_days, paused_days)
     return _n_per_week(habit, by_date, start, end_date, window_days, paused_days)
@@ -73,7 +82,7 @@ def compute_habit_consistency(
 def _weekdays(
     habit, by_date, start, end_date, window_days, paused_days: frozenset[date] = frozenset()
 ) -> HabitConsistency:
-    days = [start + timedelta(days=i) for i in range(window_days)]
+    days = [start + timedelta(days=i) for i in range((end_date - start).days + 1)]
     scheduled = [d for d in days if d.weekday() in habit.target_frequency.days]
     evaluated = [
         d for d in scheduled
@@ -109,7 +118,8 @@ def _n_per_week(
     habit, by_date, start, end_date, window_days, paused_days: frozenset[date] = frozenset()
 ) -> HabitConsistency:
     target = habit.target_frequency.count
-    days = [start + timedelta(days=i) for i in range(window_days)]
+    span = (end_date - start).days + 1
+    days = [start + timedelta(days=i) for i in range(span)]
     active_days = sum(1 for d in days if d not in paused_days or d in by_date)
     expected = target * active_days / 7
     total_credit = sum(credit(l.status) for l in by_date.values())
@@ -143,7 +153,7 @@ def _n_per_week(
     return HabitConsistency(
         habit_id=habit.id, habit_name=habit.name, window_days=window_days,
         consistency_pct=_pct(earned, expected), expected=expected, earned=earned,
-        logged_days=len(by_date), coverage_pct=_pct(len(by_date), window_days),
+        logged_days=len(by_date), coverage_pct=_pct(len(by_date), span),
         longest_run=longest, current_run=current, run_unit="weeks", comeback_rate=None,
     )
 

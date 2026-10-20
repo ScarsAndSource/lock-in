@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
-from app.db import get_db
+from app.db import AsyncSessionLocal, get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
@@ -91,8 +91,10 @@ def get_insight_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchem
     return SqlAlchemyInsightRepository(session)
 
 
-def get_llm_usage_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyLlmUsageRepository:
-    return SqlAlchemyLlmUsageRepository(session)
+def get_llm_usage_repository(settings: Settings = Depends(get_settings)) -> SqlAlchemyLlmUsageRepository:
+    """Usage is counted in its OWN transaction (not the request's), so a request that fails after an LLM call
+    still keeps the count and the daily cap cannot be undercounted."""
+    return SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced)
 
 
 def get_chat_thread_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyChatThreadRepository:
@@ -222,6 +224,8 @@ def get_llm_client(
         settings.groq_model,
         settings.groq_timeout_seconds,
         settings.groq_base_url,
+        transcribe_model=settings.groq_transcribe_model,
+        vision_model=settings.groq_vision_model,
     )
     return BudgetedLLM(inner, usage, user_id, settings.llm_daily_call_cap, "chat", clock)
 
