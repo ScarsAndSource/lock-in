@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { confirmCheckin, getJournal } from '../api/checkins';
 import { fetchSupport } from '../api/support';
 import { SupportCard } from './SupportCard';
+import { MoodPicker } from './MoodPicker';
 import { HabitStatus, CheckinOverride, SupportPayload } from '../types';
 import { toTimeInput } from '../lib/dates';
 import { errorMessage } from '../lib/format';
@@ -49,6 +50,8 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
   const [journalText, setJournalText] = useState('');
   const [sleepDirty, setSleepDirty] = useState(false);
   const [screenDirty, setScreenDirty] = useState(false);
+  const [mood, setMood] = useState<{ valence: number | null; energy: number | null }>({ valence: null, energy: null });
+  const [moodDirty, setMoodDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [crisisDetected, setCrisisDetected] = useState(false);
   const [bannerSupport, setBannerSupport] = useState<SupportPayload | null>(null);
@@ -61,6 +64,8 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
     setHabitOverrides({});
     setSleepDirty(false);
     setScreenDirty(false);
+    setMood({ valence: checkinView.mood?.valence ?? null, energy: checkinView.mood?.energy ?? null });
+    setMoodDirty(false);
     setBedtime(toTimeInput(sleep?.time_to_bed, '23:30'));
     setWakeTime(toTimeInput(sleep?.time_woke, '06:45'));
     setSleepQuality(sleep?.self_rated_quality ?? 4);
@@ -129,6 +134,8 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
             }
           : null,
         screen_time: screenDirty ? { total_minutes: screenMinutes, source: 'manual' } : null,
+        // Only sent once both rows are tapped; null leaves any saved mood untouched.
+        mood: moodDirty && mood.valence !== null && mood.energy !== null ? { valence: mood.valence, energy: mood.energy } : null,
         accept_sleep_default: !sleepDirty,
         accept_screen_time_default: !screenDirty,
       });
@@ -305,6 +312,18 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                 className="w-full accent-ink"
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">Mood</h3>
+            <MoodPicker
+              valence={mood.valence}
+              energy={mood.energy}
+              onChange={(next) => {
+                setMood(next);
+                setMoodDirty(true);
+              }}
+            />
           </div>
 
           <div className="space-y-2">

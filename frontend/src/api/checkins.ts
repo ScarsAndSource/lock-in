@@ -51,12 +51,16 @@ export async function confirmCheckin(
         is_default: false,
       };
     }
+    if (payload.mood) {
+      currentCheckinView.mood = { log_date: dateStr, ...payload.mood };
+    }
     return {
       checkin_date: dateStr,
       confirmed_at: new Date().toISOString(),
       entries: currentCheckinView.entries,
       sleep: currentCheckinView.sleep.logged,
       screen_time: currentCheckinView.screen_time.logged,
+      mood: currentCheckinView.mood ?? null,
       support: null,
     };
   }

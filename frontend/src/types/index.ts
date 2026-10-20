@@ -45,6 +45,15 @@ export interface HabitLog {
   is_default: boolean;
 }
 
+export interface MoodEntry {
+  valence: number; // 1 rough .. 5 great
+  energy: number; // 1 drained .. 5 buzzing
+}
+
+export interface MoodLog extends MoodEntry {
+  log_date: string;
+}
+
 export interface SleepLog {
   log_date: string;
   time_to_bed: string | null;
@@ -170,6 +179,7 @@ export interface CheckinView {
   sleep: SleepSection;
   screen_time: ScreenTimeSection;
   bounce?: Bounce;
+  mood?: MoodLog | null;
 }
 
 export interface CheckinOverride {
@@ -191,6 +201,7 @@ export interface CheckinConfirmRequest {
     source?: ScreenTimeSource;
     category_breakdown?: Record<string, number> | null;
   } | null;
+  mood?: MoodEntry | null; // omit/null = leave today's mood untouched
   accept_sleep_default?: boolean;
   accept_screen_time_default?: boolean;
 }
@@ -214,6 +225,7 @@ export interface CheckinConfirmResponse {
   entries: CheckinEntry[];
   sleep: SleepLog | null;
   screen_time: ScreenTimeLog | null;
+  mood?: MoodLog | null;
   support?: SupportPayload | null;
 }
 

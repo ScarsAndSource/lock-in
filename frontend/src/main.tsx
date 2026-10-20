@@ -19,8 +19,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 // Register service worker if supported
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('SW registration failed:', err);
-    });
+    navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        // An installed PWA can stay open for days: re-check for a new build whenever it comes back to the foreground.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
+      .catch((err) => {
+        console.warn('SW registration failed:', err);
+      });
   });
 }
