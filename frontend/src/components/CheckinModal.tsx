@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { confirmCheckin, getJournal } from '../api/checkins';
-import { HabitStatus, CheckinOverride } from '../types';
+import { fetchSupport } from '../api/support';
+import { SupportCard } from './SupportCard';
+import { HabitStatus, CheckinOverride, SupportPayload } from '../types';
 import { toTimeInput } from '../lib/dates';
 import { errorMessage } from '../lib/format';
 
@@ -10,10 +12,34 @@ interface CheckinModalProps {
   onClose: () => void;
 }
 
-const CRISIS_FLAGS = ['suicide', 'kill myself', 'self-harm', 'end my life', 'want to die'];
+// A quick heads-up while typing. The backend's check on save is the real one (it is broader, and also covers
+// Roman-script Hindi and spelling tricks), and its response is what finally decides what the user is shown.
+const CRISIS_FLAGS = [
+  'suicid',
+  'kill myself',
+  'killing myself',
+  'self-harm',
+  'self harm',
+  'selfharm',
+  'hurt myself',
+  'end my life',
+  'take my life',
+  'want to die',
+  'wanna die',
+  'dont want to live',
+  'do not want to live',
+  'better off dead',
+  'no reason to live',
+  'khudkushi',
+  'marna chahta',
+  'marna chahti',
+  'jeene ka mann nahi',
+];
+
+const normalizeForCrisis = (text: string): string => text.toLowerCase().replace(/[\u2019'`]/g, '');
 
 export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) => {
-  const { checkinView, activeDate, refreshCheckinView, bumpData, showToast } = useApp();
+  const { checkinView, activeDate, refreshCheckinView, bumpData, showToast, profile } = useApp();
 
   const [habitOverrides, setHabitOverrides] = useState<Record<string, HabitStatus>>({});
   const [bedtime, setBedtime] = useState('23:30');
@@ -25,6 +51,8 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
   const [screenDirty, setScreenDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [crisisDetected, setCrisisDetected] = useState(false);
+  const [bannerSupport, setBannerSupport] = useState<SupportPayload | null>(null);
+  const [savedSupport, setSavedSupport] = useState<SupportPayload | null>(null);
 
   useEffect(() => {
     if (!isOpen || !checkinView) return;
@@ -46,9 +74,39 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
   }, [isOpen, checkinView, activeDate]);
 
   useEffect(() => {
-    const lower = journalText.toLowerCase();
-    setCrisisDetected(CRISIS_FLAGS.some((kw) => lower.includes(kw)));
+    const lower = normalizeForCrisis(journalText);
+    setCrisisDetected(CRISIS_FLAGS.some((kw) => lower.includes(normalizeForCrisis(kw))));
   }, [journalText]);
+
+  // Region-aware resources from the backend (India gets Tele-MANAS / KIRAN / 112), never hard-coded numbers.
+  useEffect(() => {
+    if (!crisisDetected || bannerSupport) return;
+    let cancelled = false;
+    fetchSupport(profile?.timezone)
+      .then((payload) => {
+        if (!cancelled) setBannerSupport(payload);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBannerSupport({
+            region: 'GLOBAL',
+            message: 'If you might act on these thoughts soon, call your local emergency number right now.',
+            resources: [
+              { name: 'Find a helpline', contact: 'findahelpline.com', detail: 'Helplines listed by country.' },
+            ],
+            verified_on: '',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [crisisDetected, bannerSupport, profile?.timezone]);
+
+  // A fresh open starts clean; closing drops the saved-with-support view.
+  useEffect(() => {
+    if (!isOpen) setSavedSupport(null);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -75,14 +133,15 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
         accept_screen_time_default: !screenDirty,
       });
 
-      if (result.support) {
-        showToast('Check-in saved. Support resources are on screen.');
-      } else {
-        showToast(checkinView?.already_confirmed ? 'Check-in updated' : 'Daily check-in locked in');
-      }
+      showToast(checkinView?.already_confirmed ? 'Check-in updated' : 'Daily check-in locked in');
       bumpData();
       await refreshCheckinView();
-      onClose();
+      if (result.support) {
+        // Keep the modal open on the resources: closing here would hide exactly what the user needs to see.
+        setSavedSupport(result.support);
+      } else {
+        onClose();
+      }
     } catch (err) {
       showToast(errorMessage(err, 'Could not save check-in'));
     } finally {
@@ -109,6 +168,27 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
           </button>
         </div>
 
+        {savedSupport ? (
+          <>
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              <div className="p-3 bg-surface-container rounded-lg flex items-center gap-2.5">
+                <span className="material-symbols-outlined text-ink text-[20px]">check_circle</span>
+                <p className="font-small text-small text-ink">Your check-in is saved.</p>
+              </div>
+              <SupportCard support={savedSupport} />
+            </div>
+            <div className="p-4 bg-surface border-t border-surface-container shrink-0">
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full h-12 bg-ink text-ground-chalk rounded-xl font-body-strong text-body-strong active:bg-secondary transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         <div className="p-4 overflow-y-auto space-y-5 flex-1">
           <div className="p-3 bg-surface-container rounded-lg flex items-center gap-2.5">
             <span className="material-symbols-outlined text-ink text-[20px]">verified</span>
@@ -242,25 +322,7 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
             />
           </div>
 
-          {crisisDetected && (
-            <div className="p-4 bg-error-container text-on-error-container rounded-xl border border-error space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px]">warning</span>
-                <span className="font-body-strong font-bold">Immediate Support Resources</span>
-              </div>
-              <p className="font-small text-small">
-                If you are going through a crisis, please reach out to real support right now:
-              </p>
-              <div className="space-y-1 font-small-medium">
-                <div>
-                  • National Crisis Lifeline: <strong>Call or Text 988</strong> (24/7)
-                </div>
-                <div>
-                  • Crisis Text Line: <strong>Text HOME to 741741</strong>
-                </div>
-              </div>
-            </div>
-          )}
+          {crisisDetected && bannerSupport && <SupportCard support={bannerSupport} />}
         </div>
 
         <div className="p-4 bg-surface border-t border-surface-container shrink-0 space-y-2">
@@ -287,6 +349,8 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
             Cancel
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

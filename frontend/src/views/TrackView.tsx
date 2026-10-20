@@ -13,6 +13,7 @@ import {
   logScreenTime,
 } from '../api/tracking';
 import { getPauseOverview, quickPause, resumePause } from '../api/pauses';
+import { getScreenLogs, getSleepLogs } from '../api/logs';
 import {
   ConsistencyOut,
   Subject,
@@ -21,8 +22,19 @@ import {
   UrgeSummary,
   PauseOverview,
   PausePreset,
+  SleepLog,
+  ScreenTimeLog,
 } from '../types';
-import { formatComeback, formatMinutes, formatPct, errorMessage } from '../lib/format';
+import {
+  formatClock12,
+  formatComeback,
+  formatMinutes,
+  formatPct,
+  errorMessage,
+  mean,
+  medianClockMinutes,
+} from '../lib/format';
+import { addDaysISO } from '../lib/dates';
 
 type TrackDomain = 'habits' | 'sleep' | 'screen' | 'study' | 'urges' | 'pauses';
 
@@ -37,6 +49,8 @@ export const TrackView: React.FC = () => {
   const [urges, setUrges] = useState<UrgeLog[]>([]);
   const [urgeSummary, setUrgeSummary] = useState<UrgeSummary | null>(null);
   const [pauseOverview, setPauseOverview] = useState<PauseOverview | null>(null);
+  const [sleepLogs, setSleepLogs] = useState<SleepLog[]>([]);
+  const [screenLogs, setScreenLogs] = useState<ScreenTimeLog[]>([]);
 
   // Forms
   const [newHabitName, setNewHabitName] = useState('');
@@ -54,13 +68,15 @@ export const TrackView: React.FC = () => {
 
   const loadAll = async () => {
     try {
-      const [cons, subjs, summ, urg, urgSumm, pauseOver] = await Promise.all([
+      const [cons, subjs, summ, urg, urgSumm, pauseOver, sleepRows, screenRows] = await Promise.all([
         getConsistency(30, activeDate),
         getSubjects(),
         getStudySummary(activeDate, 30),
         getUrges(activeDate, 14, true),
         getUrgeSummary(14),
         getPauseOverview(),
+        getSleepLogs(activeDate, 14),
+        getScreenLogs(activeDate, 14),
       ]);
       setConsistency(cons);
       setSubjects(subjs);
@@ -68,6 +84,8 @@ export const TrackView: React.FC = () => {
       setUrges(urg);
       setUrgeSummary(urgSumm);
       setPauseOverview(pauseOver);
+      setSleepLogs(sleepRows);
+      setScreenLogs(screenRows);
       if (subjs.length > 0 && !sessionSubjectId) {
         setSessionSubjectId(subjs[0].id);
       }
@@ -177,6 +195,21 @@ export const TrackView: React.FC = () => {
     }
   };
 
+  // ---- real numbers only: auto-filled defaults are guesses, so they never feed these cards
+  const realSleep = sleepLogs.filter((l) => !l.is_default);
+  const avgSleepMinutes = mean(
+    realSleep.map((l) => l.duration_minutes).filter((v): v is number => typeof v === 'number')
+  );
+  const typicalBed = medianClockMinutes(realSleep.map((l) => l.time_to_bed), true);
+  const typicalWake = medianClockMinutes(realSleep.map((l) => l.time_woke));
+
+  const realScreen = screenLogs.filter((l) => !l.is_default);
+  const screenToday = realScreen.find((l) => l.log_date === activeDate) ?? null;
+  const weekStart = addDaysISO(activeDate, -6);
+  const screenWeek = realScreen.filter((l) => l.log_date >= weekStart && l.log_date <= activeDate);
+  const avgScreenMinutes = mean(screenWeek.map((l) => l.total_minutes));
+  const screenBreakdown = Object.entries(screenToday?.category_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
+
   return (
     <div className="flex flex-col w-full pb-8 max-w-md mx-auto space-y-5">
       {/* Domain Switcher */}
@@ -281,13 +314,15 @@ export const TrackView: React.FC = () => {
               Sleep Foundation
             </span>
             <div className="flex items-center justify-between">
-              <span className="font-title text-title text-ink font-bold">7 hr 15 min</span>
+              <span className="font-title text-title text-ink font-bold">{formatMinutes(avgSleepMinutes === null ? null : Math.round(avgSleepMinutes))}</span>
               <span className="px-2.5 py-1 rounded bg-domain-sleep-tint text-domain-sleep-fill font-caption text-caption font-semibold">
-                88% Regularity
+                {realSleep.length} {realSleep.length === 1 ? 'night' : 'nights'} logged
               </span>
             </div>
             <p className="font-caption text-caption text-muted-text">
-              Target: In bed by 11:30 pm · Median wake up 06:45 am
+              {realSleep.length > 0
+                ? `Average over the last 14 days · typically in bed ${formatClock12(typicalBed)}, up ${formatClock12(typicalWake)}`
+                : 'No sleep logged in the last 14 days. Log a night below to see your pattern.'}
             </p>
           </div>
 
@@ -344,16 +379,26 @@ export const TrackView: React.FC = () => {
               Screen Exposure
             </span>
             <div className="flex items-center justify-between">
-              <span className="font-title text-title text-ink font-bold">3 hr 10 min</span>
+              <span className="font-title text-title text-ink font-bold">
+                {formatMinutes(screenToday?.total_minutes)}
+              </span>
               <span className="px-2.5 py-1 rounded bg-domain-screen-tint text-ink font-caption text-caption font-semibold">
-                Under 3.5h Cap
+                7-day avg {formatMinutes(avgScreenMinutes === null ? null : Math.round(avgScreenMinutes))}
               </span>
             </div>
-            <div className="space-y-1 pt-1 font-caption text-caption text-muted-text">
-              <div className="flex justify-between"><span>Productivity:</span><span>2h 00m</span></div>
-              <div className="flex justify-between"><span>Social & Feeds:</span><span>45m</span></div>
-              <div className="flex justify-between"><span>Entertainment:</span><span>25m</span></div>
-            </div>
+            <p className="font-caption text-caption text-muted-text">
+              {screenToday ? 'Logged for this day' : 'Nothing logged for this day yet.'}
+            </p>
+            {screenBreakdown.length > 0 && (
+              <div className="space-y-1 pt-1 font-caption text-caption text-muted-text">
+                {screenBreakdown.map(([name, minutes]) => (
+                  <div key={name} className="flex justify-between">
+                    <span className="capitalize">{name.replace(/_/g, ' ')}:</span>
+                    <span>{formatMinutes(minutes)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <form onSubmit={handleLogScreen} className="p-4 bg-surface rounded-xl border border-line space-y-3">
@@ -393,7 +438,7 @@ export const TrackView: React.FC = () => {
                 Academic Follow-Through
               </span>
               <span className="font-title text-title text-ink font-bold">
-                {studySummary?.follow_through_pct || 94}%
+                {formatPct(studySummary?.follow_through_pct, 0)}
               </span>
             </div>
             <p className="font-caption text-caption text-muted-text">
@@ -497,13 +542,13 @@ export const TrackView: React.FC = () => {
                 14-Day Resist Rate
               </span>
               <span className="font-title text-title text-domain-urges-fill font-bold">
-                {urgeSummary?.resist_rate_pct || 83.3}%
+                {formatPct(urgeSummary?.resist_rate_pct)}
               </span>
             </div>
             <div className="flex items-center justify-between font-caption text-caption text-muted-text">
-              <span>{urgeSummary?.resisted || 5} Resisted</span>
-              <span>{urgeSummary?.relapsed || 1} Relapsed</span>
-              <span>{urgeSummary?.relapse_free_days_pct || 92.8}% Free Days</span>
+              <span>{urgeSummary?.resisted ?? 0} Resisted</span>
+              <span>{urgeSummary?.relapsed ?? 0} Relapsed</span>
+              <span>{formatPct(urgeSummary?.relapse_free_days_pct)} Free Days</span>
             </div>
           </div>
 

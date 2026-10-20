@@ -1,38 +1,55 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { getChatThreads, getThreadDetail, sendMessage } from '../api/chat';
-import { Thread, ChatMessage } from '../types';
+import { fetchSupport } from '../api/support';
+import { SupportCard } from '../components/SupportCard';
+import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
 export const ChatView: React.FC = () => {
-  const { showToast } = useApp();
+  const { showToast, profile } = useApp();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [support, setSupport] = useState<SupportPayload | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getChatThreads().then((thList) => {
-      setThreads(thList);
-      if (thList.length > 0) {
-        setActiveThreadId(thList[0].id);
-      }
-    });
+    getChatThreads()
+      .then((thList) => {
+        setThreads(thList);
+        if (thList.length > 0) {
+          setActiveThreadId(thList[0].id);
+        }
+      })
+      .catch((err: unknown) => showToast(errorMessage(err, 'Could not load your chats')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (activeThreadId) {
-      getThreadDetail(activeThreadId).then((detail) => {
-        setMessages(detail.messages);
-      });
+      let cancelled = false;
+      getThreadDetail(activeThreadId)
+        .then((detail) => {
+          if (cancelled) return;
+          setMessages(detail.messages);
+          setSupport(detail.support ?? null);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) showToast(errorMessage(err, 'Could not load this chat'));
+        });
+      return () => {
+        cancelled = true;
+      };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeThreadId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, support]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +62,16 @@ export const ChatView: React.FC = () => {
     try {
       const res = await sendMessage(text, activeThreadId || undefined);
       setMessages((prev) => [...prev, res.user_message, res.reply]);
+      // The reply says "one of the lines below", so the resources must actually be on screen.
+      let nextSupport = res.support ?? null;
+      if (!nextSupport && res.reply.mode === 'support') {
+        try {
+          nextSupport = await fetchSupport(profile?.timezone);
+        } catch {
+          nextSupport = null;
+        }
+      }
+      setSupport(nextSupport);
       if (!activeThreadId) {
         setActiveThreadId(res.thread.id);
         setThreads((prev) => [res.thread, ...prev]);
@@ -59,6 +86,7 @@ export const ChatView: React.FC = () => {
   const startNewChat = () => {
     setActiveThreadId(null);
     setMessages([]);
+    setSupport(null);
   };
 
   return (
@@ -140,6 +168,7 @@ export const ChatView: React.FC = () => {
             </span>
           </div>
         ))}
+        {support && <SupportCard support={support} />}
         {isSending && (
           <div className="flex items-center gap-1.5 p-3 text-caption text-muted-text">
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce" />
