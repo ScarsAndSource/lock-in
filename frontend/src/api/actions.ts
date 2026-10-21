@@ -1,6 +1,6 @@
 import { request, isDemoMode } from './client';
 
-export type ActionKind = 'task' | 'checkin' | 'habit' | 'risk' | 'winddown' | 'study';
+export type ActionKind = 'task' | 'checkin' | 'habit' | 'risk' | 'winddown' | 'study' | 'morning' | 'comeback';
 
 export interface ActionResult {
   status: 'done' | 'already' | 'failed';

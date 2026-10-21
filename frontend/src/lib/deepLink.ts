@@ -1,30 +1,43 @@
 import { useEffect } from 'react';
 
-/** Where a notification tap lands: /?a=checkin, /?a=habit, /?a=tasks, /?a=plan, /?a=sleep, /?a=study */
-export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study';
-const KNOWN: ReadonlySet<string> = new Set(['checkin', 'habit', 'tasks', 'plan', 'sleep', 'study']);
+/** Where a notification tap lands: /?a=checkin, /?a=habit, /?a=tasks, /?a=plan, /?a=sleep, /?a=study, /?a=focus, /?a=comeback */
+export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study' | 'focus' | 'comeback';
+const KNOWN: ReadonlySet<string> = new Set(['checkin', 'habit', 'tasks', 'plan', 'sleep', 'study', 'focus', 'comeback']);
 
-/** Reads ?a=..., removes it from the address bar (a refresh must not re-trigger it) and returns it. */
-export function consumeDeepLink(): DeepLink | null {
+export interface DeepLinkParams {
+  link: DeepLink;
+  k?: string;
+  id?: string;
+}
+
+/** Reads ?a=... and associated params (?k=..., ?id=...), removes them from the address bar
+ *  (a refresh must not re-trigger it) and returns them. */
+export function consumeDeepLink(): DeepLinkParams | null {
   const url = new URL(window.location.href);
   const a = url.searchParams.get('a');
-  if (!a) return null;
+  if (!a || !KNOWN.has(a)) return null;
+  const k = url.searchParams.get('k') || undefined;
+  const id = url.searchParams.get('id') || undefined;
   url.searchParams.delete('a');
+  url.searchParams.delete('k');
+  url.searchParams.delete('id');
   window.history.replaceState(null, '', url.pathname + (url.search || '') + url.hash);
-  return KNOWN.has(a) ? (a as DeepLink) : null;
+  return { link: a as DeepLink, k, id };
 }
 
 /**
  * Call once near the top of the signed-in app. `handle` decides what each link opens, for example:
  *   checkin -> show the "Lock it / Rough day" sheet (runInAppAction('checkin', 'lock'))
  *   plan    -> open the person's own if-then plan
+ *   focus   -> open the focused item (?k=task|habit&id=...)
+ *   comeback-> open the comeback habit (?id=...)
  * It also fires when the service worker focuses an already-open window, because that navigates to the deep link.
  */
-export function useDeepLink(handle: (link: DeepLink) => void): void {
+export function useDeepLink(handle: (link: DeepLink, params?: { k?: string; id?: string }) => void): void {
   useEffect(() => {
     const run = () => {
-      const link = consumeDeepLink();
-      if (link) handle(link);
+      const res = consumeDeepLink();
+      if (res) handle(res.link, { k: res.k, id: res.id });
     };
     run();
     window.addEventListener('focus', run);

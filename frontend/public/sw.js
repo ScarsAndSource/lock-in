@@ -82,6 +82,8 @@ self.addEventListener('fetch', (event) => {
 // token straight to the API (no session needed), so the loop closes from the lock screen without opening the app.
 // iOS web push shows no buttons: there the body tap deep-links into the app (/?a=checkin ...), which finishes the job.
 const ICON = '/favicon.svg';
+// Buttons that finish by opening the app on the thing itself (morning "Start"): the tap is recorded first, then we go.
+const OPEN_AFTER = new Set(['start']);
 
 self.addEventListener('push', (event) => {
   let data = {};
@@ -148,7 +150,7 @@ async function runButton(d, action) {
     const res = await postAction(d, action);
     if (res.ok) {
       const body = await res.json().catch(() => ({}));
-      if (body && body.status !== 'failed') return flash(body.message || 'Done', d.tag);
+      if (body && body.status !== 'failed') return OPEN_AFTER.has(action) ? openApp(d.url || '/') : flash(body.message || 'Done', d.tag);
     }
     // 401 / 410 (expired) / 429 / a failed action: don't pretend it worked. Hand over to the app.
   } catch (_) {
