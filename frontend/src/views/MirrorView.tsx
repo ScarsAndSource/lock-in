@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import type { DomainKey } from '../context/AppContext';
 import { WeeklyRetro } from '../components/WeeklyRetro';
 import { SevenDayWeave } from '../components/SevenDayWeave';
+import { ExperimentCard } from '../components/ExperimentCard';
 import { PatternsFeed } from '../components/PatternsFeed';
 import { InsightsFeed } from '../components/InsightsFeed';
 import { getActiveMission } from '../api/profile';
@@ -68,6 +69,8 @@ export const MirrorView: React.FC = () => {
       )}
 
       <SevenDayWeave days={14} defaultExpanded />
+
+      <ExperimentCard />
 
       <section className="space-y-2">
         <h3 className="font-section text-section text-ink">Log and review</h3>

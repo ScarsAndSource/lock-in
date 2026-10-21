@@ -449,3 +449,21 @@ class CompanionMomentORM(Base):
     moment: Mapped[str] = mapped_column(Text, primary_key=True)
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+class ExperimentORM(Base):
+    __tablename__ = "experiments"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    change_text: Mapped[str] = mapped_column(Text, nullable=False)
+    metric: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    baseline_days: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    treatment_days: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    start_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+

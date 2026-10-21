@@ -7,6 +7,8 @@ from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
+from app.repositories.experiment_repository import SqlAlchemyExperimentRepository
+from app.services.experiments_service import ExperimentsService
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.companion_repository import SqlAlchemyCompanionRepository
@@ -473,3 +475,17 @@ def get_companion_service(
     clock: Clock = Depends(get_clock),
 ) -> CompanionService:
     return CompanionService(repo, checkins, tasks, profiles, intentions, clock)
+
+# ---- experiments (N-of-1)
+def get_experiment_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyExperimentRepository:
+    return SqlAlchemyExperimentRepository(session)
+
+
+def get_experiments_service(
+    repo: SqlAlchemyExperimentRepository = Depends(get_experiment_repository),
+    stats: StatsService = Depends(get_stats_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> ExperimentsService:
+    return ExperimentsService(repo, stats, profiles, clock)
+
