@@ -87,7 +87,7 @@ def build_stack(
     insights = InsightsService(insight_repo, stats, clock, llm=scoped(llm, "insight") if llm is not None else None)
     planner = CompanionPlanner(
         ledger, habit_repo, checkin_repo, urge_repo, sleep_repo, goal_repo, study, intentions, stats, pause_repo,
-        insights=insight_repo,
+        tasks=task_repo, insights=insight_repo,
     )
     ns = SimpleNamespace(planner=planner, ledger=ledger, profiles=profiles, insights=insights)
     ns.pulse = DailyPulse(ledger, checkin_repo, insights)

@@ -316,3 +316,153 @@ def test_ledger_sql_compiles_against_postgres_and_orm_matches_migration():
         assert re.search(rf"\b{col.name}\b", migration), col.name
     for col in ("companion_enabled", "checkin_hour", "plan_cues_in_quiet", "discreet_push"):
         assert col in NotificationPrefsORM.__table__.columns and col in migration
+
+
+# =============================================================== morning + comeback
+from dataclasses import replace  # noqa: E402
+
+AM = datetime(2026, 10, 13, 2, 40, tzinfo=UTC)          # Tue 08:10 IST: ten minutes into the default morning window
+
+
+def _task(title="Submit lab report", importance=3, overdue=False) -> cp.OpenTask:
+    return cp.OpenTask(task_id=uuid4(), title=title, importance=importance, due_at=ist(2026, 10, 13, 17), overdue=overdue)
+
+
+def _info(silent=3, floor="10-min walk", name="Gym", habit_id=None) -> cp.ComebackInfo:
+    return cp.ComebackInfo(habit_id=habit_id or uuid4(), name=name, floor_text=floor, silent_days=silent, slip_streak=silent)
+
+
+def test_median_wake_keeps_a_midnight_straddling_cluster_together():
+    assert cp.median_wake([time(23, 50), time(0, 10), time(23, 55), time(0, 5), time(0, 0)]) == time(0, 0)
+    assert cp.median_wake([time(6, 10), time(6, 20), time(6, 30), time(6, 40), time(7, 0)]) == time(6, 30)
+    assert cp.median_wake([time(6, 30)] * 4) is None                      # fewer than 5 real logs
+    assert cp.median_bedtime([time(23, 30), time(0, 30), time(0, 0), time(23, 45), time(0, 15)]) == time(0, 0)   # unchanged
+
+
+def test_morning_opens_after_the_usual_wake_but_never_inside_quiet_hours():
+    q = (time(22, 0), time(8, 0))
+    assert cp.morning_start(*q, time(6, 10)) == time(8, 0)                # early riser: quiet hours end first
+    assert cp.morning_start(*q, time(8, 40)) == time(9, 0)                # 20 minutes after waking
+    assert cp.morning_start(*q, None) == time(8, 0)                       # no wake data: quiet_end
+    assert cp.morning_start(*q, time(13, 0)) == time(12, 0)               # late riser: capped at quiet_end + 4 h
+    off = (time(0, 0), time(0, 0))                                        # quiet hours switched off
+    assert cp.morning_start(*off, None) == time(8, 0)
+    assert cp.morning_start(*off, time(6, 0)) == time(6, 20)
+    assert cp.morning_start(*off, time(2, 0)) == time(5, 0)               # never before 05:00
+    assert cp.morning_start(*off, time(23, 50)) is None                   # past midnight: no morning today
+
+
+def test_morning_window_is_ninety_minutes_and_ends_before_the_habit_hour():
+    p = prefs()
+    assert not cp.morning_window_open(AM - timedelta(minutes=11), TZ, p, None)    # 07:59
+    assert cp.morning_window_open(AM - timedelta(minutes=10), TZ, p, None)        # 08:00
+    assert cp.morning_window_open(AM + timedelta(minutes=80), TZ, p, None)        # 09:30
+    assert not cp.morning_window_open(AM + timedelta(minutes=81), TZ, p, None)
+    assert not cp.morning_window_open(AM, TZ, prefs(nudge_hour=8), None)          # the habit-nudge hour owns the day
+
+
+def test_morning_possible_is_a_cheap_gate_that_never_hides_a_real_window():
+    p = prefs()
+    assert cp.morning_possible(AM, TZ, p)                                          # 08:10
+    assert cp.morning_possible(AM + timedelta(hours=5, minutes=20), TZ, p)         # 13:30: latest a late riser's window can close
+    assert not cp.morning_possible(AM + timedelta(hours=5, minutes=21), TZ, p)     # 13:31
+    assert not cp.morning_possible(AM - timedelta(minutes=11), TZ, p)              # 07:59
+    off = prefs(quiet_start=time(0, 0), quiet_end=time(0, 0))
+    assert not cp.morning_possible(AM - timedelta(hours=3, minutes=11), TZ, off)   # 04:59
+    assert cp.morning_possible(AM - timedelta(hours=3, minutes=10), TZ, off)       # 05:00
+    for wake in (None, time(6, 0), time(9, 30), time(13, 0)):                      # the gate is never stricter than the window
+        for minute in range(0, 24 * 60, 5):
+            at = datetime(2026, 10, 13, minute // 60, minute % 60, tzinfo=TZ)
+            if cp.morning_window_open(at, TZ, p, wake):
+                assert cp.morning_possible(at, TZ, p)
+
+
+def test_morning_picks_a_task_due_today_before_any_habit():
+    low, high = _task("Buy cable", 2), _task("Submit report", 3)
+    pick = cp.pick_morning([low, high], [habit("Gym", consistency_pct=10.0)], [])
+    assert (pick.kind, pick.entity_id, pick.name) == ("task", high.task_id, "Submit report")
+    assert pick.detail.startswith("Due today")
+    assert cp.pick_morning([_task("Sort drawer", 1)], [], []) is None             # small chores never earn their own push
+    assert cp.pick_morning([_task("Pay fees", 2, overdue=True)], [], []).detail.startswith("Still open")
+
+
+def test_morning_falls_back_to_the_weakest_open_habit_in_their_own_words():
+    strong, auto = habit("Read", consistency_pct=90.0), habit("Water", consistency_pct=99.0, automatic=True)
+    weak = habit("Gym", consistency_pct=20.0, floor_text="10-min walk")
+    pick = cp.pick_morning([], [strong, weak, auto], [])
+    assert (pick.kind, pick.entity_id) == ("habit", weak.habit_id) and "10-min walk" in pick.detail
+    cue = cp.PlanCue(cue="I put my shoes on", action="walk out the door", entity_id=weak.habit_id)
+    assert cp.pick_morning([], [strong, weak], [cue]).detail == "If I put my shoes on, then walk out the door"
+    faded = cp.PlanCue(cue="x", action="y", level="light", entity_id=weak.habit_id)
+    assert "10-min walk" in cp.pick_morning([], [weak], [faded]).detail           # a faded plan is not quoted
+    assert cp.pick_morning([], [auto], []) is None                                # automatic habits never get a push
+
+
+def test_morning_push_is_one_thing_with_start_and_not_today():
+    t = _task()
+    out = cp.plan_companion(ctx(now=AM, morning_pick=cp.pick_morning([t], [], [])))
+    assert len(out) == 1
+    m = out[0]
+    assert (m.kind, m.title, m.priority, m.key) == ("morning", "One thing today", 75, "morning:2026-10-13")
+    assert m.body == "Submit lab report. Due today. Start with five minutes."
+    assert [a for a, _ in m.actions] == ["start", "later"]
+    assert m.url == f"/?a=focus&k=task&id={t.task_id}"
+    assert m.args == {"k": "task", "id": str(t.task_id), "date": "2026-10-13"}
+
+
+def test_morning_is_silent_outside_its_window_once_sent_and_when_a_comeback_owns_the_morning():
+    pick = cp.pick_morning([_task()], [], [])
+    assert cp.plan_companion(ctx(now=AM + timedelta(minutes=90), morning_pick=pick)) == []    # 09:40, window over
+    assert cp.plan_companion(ctx(now=AM - timedelta(minutes=40), morning_pick=pick)) == []    # 07:30, quiet hours
+    sent = [row("morning", AM - timedelta(minutes=50), key="morning:2026-10-13")]
+    assert cp.plan_companion(ctx(now=AM, morning_pick=pick, ledger=sent)) == []               # already sent today
+    out = cp.plan_companion(ctx(now=AM, morning_pick=pick, comeback=_info(silent=3)))
+    assert [m.kind for m in out] == ["comeback"]                                                # one push, not two
+    assert cp.plan_companion(ctx(now=AM, morning_pick=pick, comeback=_info(silent=20))) == []   # given up: neither
+
+
+def test_comeback_offers_one_habit_floor_only():
+    info = _info(silent=3)
+    m = cp.plan_companion(ctx(now=AM, comeback=info))[0]
+    assert (m.kind, m.title, m.priority, m.key) == ("comeback", "Start small", 78, "comeback:2026-10-13")
+    assert m.body == "Gym: 10-min walk. That counts."
+    assert list(m.actions) == [("floor", "Floor version"), ("later", "Not today")]
+    assert m.args == {"habit_id": str(info.habit_id), "date": "2026-10-13"} and m.url == f"/?a=comeback&id={info.habit_id}"
+    long = cp.plan_companion(ctx(now=AM, comeback=_info(silent=5, floor=None)))[0]
+    assert (long.title, long.body) == ("Welcome back", "Gym. Just the floor version counts today.")
+
+
+def test_comeback_needs_two_silent_days_lets_go_at_fourteen_and_needs_a_habit_to_offer():
+    for silent in (0, 1, 14, 30):
+        assert cp.plan_companion(ctx(now=AM, comeback=_info(silent=silent))) == []
+    nothing_today = cp.ComebackInfo(habit_id=None, name="", floor_text=None, silent_days=3, slip_streak=3)
+    pick = cp.pick_morning([_task()], [], [])
+    assert cp.plan_companion(ctx(now=AM, morning_pick=pick, comeback=nothing_today)) == []     # silent: not even a morning
+
+
+def test_comeback_spaces_itself_three_days_apart_and_stops_after_three_unanswered():
+    info = _info(silent=6)
+    assert cp.plan_companion(ctx(now=AM, comeback=info, ledger=[row("comeback", AM - timedelta(days=2))])) == []
+    three = [row("comeback", AM - timedelta(days=3, minutes=1))]
+    assert [m.kind for m in cp.plan_companion(ctx(now=AM, comeback=info, ledger=three))] == ["comeback"]
+    unanswered = [row("comeback", AM - timedelta(days=d, minutes=1)) for d in (3, 6, 9)]
+    assert cp.plan_companion(ctx(now=AM, comeback=info, ledger=unanswered)) == []              # never escalate: let go
+    mixed = [row("comeback", AM - timedelta(days=3, minutes=1), acted=True)] + unanswered[1:]
+    assert [m.kind for m in cp.plan_companion(ctx(now=AM, comeback=info, ledger=mixed))] == ["comeback"]
+
+
+def test_not_today_counts_as_ignored_for_morning_and_comeback_only():
+    def declined(kind, days):
+        return [replace(row(kind, AM - timedelta(days=d)), acted_at=AM - timedelta(days=d), action="later") for d in days]
+    three = declined("morning", (1, 2, 3))
+    assert cp.ignored_streak(three, "morning", AM, frozenset()) == 3 and cp.is_muted(three, "morning", AM, frozenset())
+    assert cp.ignored_streak(declined("study", (1, 2, 3)), "study", AM, frozenset()) == 0     # old kinds unchanged
+    tapped = [replace(three[0], action="start")] + three[1:]
+    assert cp.ignored_streak(tapped, "morning", AM, frozenset()) == 0                         # "Start" resets the count
+
+
+def test_new_kinds_are_registered_everywhere_the_old_ones_are():
+    for kind in ("morning", "comeback"):
+        assert kind in cp.COMPANION_KINDS and kind in cp.PRIORITY and kind in cp.TTL_MINUTES
+        assert kind in cp.RESOLVABLE_KINDS and kind in cp.DECLINABLE_KINDS
+        assert kind not in cp.PLAN_CUE_KINDS                                                  # quiet hours always win

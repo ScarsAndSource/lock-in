@@ -68,7 +68,7 @@ def build(world, uid, now, sender=None, prefs=None):
                                    pauses=world.pause_repo)
     planner = CompanionPlanner(world.ledger, world.habit_repo, world.checkin_repo, world.urge_repo, world.sleep_repo,
                                world.goal_repo, StudyService(world.subject_repo, world.study_repo, clock), intentions,
-                               stats, world.pause_repo)
+                               stats, world.pause_repo, tasks=world.task_repo)
     tasks = TasksService(world.task_repo, world.notif_repo, profiles, world.llm, clock)
     checkins = CheckinsService(world.habit_repo, world.checkin_repo, world.encryptor, world.sleep_repo,
                                world.screen_time_repo, clock, goals=world.goal_repo, pauses=world.pause_repo,
@@ -393,3 +393,116 @@ def test_gate_is_permissive_for_commands_and_quiet_for_questions():
     for no in ("Why do I keep skipping gym on Thursdays?", "How does screen time affect my sleep?",
                "what's my worst habit?", "hi"):
         assert not g(no), no
+
+
+# =============================================================== morning + comeback, end to end
+def _backdate(habit, day=date(2026, 9, 1)):
+    """The in-memory repo stamps habits with the real clock; the bounce rules ignore days before a habit existed."""
+    habit.created_at = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    return habit
+
+
+def _log(world, uid, habit, day):
+    from app.domain import HabitLog, HabitStatus
+    run(world.habit_repo.upsert_log(HabitLog(habit_id=habit.id, user_id=uid, log_date=day, status=HabitStatus.DONE)))
+
+
+def _silent_gym(world, uid):
+    gym = _backdate(make_habit(world, uid, "Gym", floor_text="10-min walk"))
+    _log(world, uid, gym, date(2026, 10, 10))              # last real log Saturday; Sun, Mon, Tue slipped (today is Wed)
+    return gym
+
+
+def test_morning_push_names_one_habit_with_start_and_not_today(world, user_a):
+    gym = _backdate(make_habit(world, user_a, "Gym", floor_text="10-min walk"))
+    s = build(world, user_a, at_ist(8, 10))
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert p["kind"] == "morning" and p["title"] == "One thing today"
+    assert p["body"] == "Gym. Floor version counts: 10-min walk"
+    assert [a["action"] for a in p["actions"]] == ["start", "later"]
+    assert p["url"] == f"/?a=focus&k=habit&id={gym.id}"
+    claims = push_actions.verify(SECRET, p["token"], world.now)
+    assert claims.kind == "morning" and set(claims.allowed) == {"start", "later"}
+    world.now += timedelta(minutes=5)
+    assert run(s.notif.dispatch(user_a)).sent == 0          # one moment, one push
+
+
+def test_morning_prefers_a_task_due_today_and_start_is_recorded_without_changing_anything(world, user_a):
+    _backdate(make_habit(world, user_a, "Gym"))
+    s = build(world, user_a, at_ist(8, 10))
+    created = run(s.tasks.create(user_a, "Submit lab report", None, 3, "2026-10-14T17:00", None, None))
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert p["kind"] == "morning" and p["body"] == "Submit lab report. Due today. Start with five minutes."
+    assert p["url"] == f"/?a=focus&k=task&id={created.task.id}"
+    r = run(s.actions.run_token(p["token"], "start"))
+    assert (r.status, r.message) == ("done", "Let's go.")
+    assert world.task_repo.rows[created.task.id].status == "open"       # Start only opens the app
+    ledger_row = next(iter(world.ledger.rows.values()))
+    assert ledger_row.action == "start" and ledger_row.acted_at is not None
+
+
+def test_a_task_the_task_nudges_will_push_anyway_is_not_also_a_morning_push(world, user_a):
+    s = build(world, user_a, at_ist(18, day=13))
+    run(s.tasks.create(user_a, "Pay fees", None, 3, "2026-10-13T20:00", None, None))
+    world.now = at_ist(8, 10)                                           # deadline passed; quiet hours just ended
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    assert [p["kind"] for p in s.sender.sent] == ["task"]
+
+
+def test_morning_follows_the_usual_wake_time(world, user_a):
+    from app.domain import SleepLog
+    _backdate(make_habit(world, user_a, "Gym"))
+    for d in range(8, 13):
+        run(world.sleep_repo.upsert_log(SleepLog(user_id=user_a, log_date=date(2026, 10, d), time_woke=time(9, 30))))
+    s = build(world, user_a, at_ist(8, 10))
+    assert run(s.notif.dispatch(user_a)).sent == 0                      # usually up at 09:30: not yet
+    world.now = at_ist(9, 55)                                           # window opens 09:50
+    assert run(s.notif.dispatch(user_a)).sent == 1 and s.sender.sent[0]["kind"] == "morning"
+
+
+def test_comeback_after_two_silent_days_offers_one_floor_version_and_replaces_the_morning(world, user_a):
+    gym = _silent_gym(world, user_a)
+    s = build(world, user_a, at_ist(8, 10))
+    run(s.tasks.create(user_a, "Submit lab report", None, 3, "2026-10-14T17:00", None, None))
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert p["kind"] == "comeback" and p["title"] == "Start small" and p["body"] == "Gym: 10-min walk. That counts."
+    assert [a["action"] for a in p["actions"]] == ["floor", "later"]
+    world.now = at_ist(9, 5)
+    assert run(s.notif.dispatch(user_a)).sent == 0                      # no morning push on top of it
+    r = run(s.actions.run_token(p["token"], "floor"))
+    assert (r.status, r.message) == ("done", "Floor version logged. It counts.")
+    log = run(world.habit_repo.get_log(user_a, gym.id, date(2026, 10, 14)))
+    assert log.status.value == "floor" and not log.is_default
+
+
+def test_comeback_is_spaced_three_days_apart_and_a_silent_person_gets_no_morning_in_between(world, user_a):
+    _silent_gym(world, user_a)
+    s = build(world, user_a, at_ist(8, 10))
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    for day in (15, 16):
+        world.now = at_ist(8, 10, day=day)
+        assert run(s.notif.dispatch(user_a)).sent == 0
+    world.now = at_ist(8, 10, day=17)
+    assert run(s.notif.dispatch(user_a)).sent == 1 and s.sender.sent[-1]["title"] == "Welcome back"
+
+
+def test_someone_who_logged_yesterday_gets_the_morning_not_the_comeback(world, user_a):
+    gym = _silent_gym(world, user_a)
+    _log(world, user_a, gym, date(2026, 10, 13))
+    s = build(world, user_a, at_ist(8, 10))
+    assert run(s.notif.dispatch(user_a)).sent == 1 and s.sender.sent[0]["kind"] == "morning"
+
+
+def test_morning_and_comeback_actions_over_the_in_app_route(world, user_a, act):
+    _stack, client = act
+    h = next(iter(world.habit_repo._habits.values()))
+    start = client.post("/actions/in-app", json={"kind": "morning", "action": "start", "args": {}})
+    assert start.status_code == 200 and start.json() == {"status": "done", "message": "Let's go."}
+    floor = client.post("/actions/in-app", json={
+        "kind": "comeback", "action": "floor", "args": {"habit_id": str(h.id), "date": "2026-10-14"}})
+    assert floor.json() == {"status": "done", "message": "Floor version logged. It counts."}
+    assert client.post("/actions/in-app", json={"kind": "comeback", "action": "done", "args": {}}).status_code == 422
+    assert client.post("/actions/in-app", json={"kind": "morning", "action": "floor", "args": {}}).status_code == 422

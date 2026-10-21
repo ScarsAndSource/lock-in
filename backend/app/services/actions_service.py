@@ -30,14 +30,15 @@ from app.services.profile_service import ProfileService
 from app.services.tasks_service import TasksService
 
 SNOOZE_MINUTES = 60
-NOOP_ACTIONS = {"ok": "Nice. Go for it.", "later": "Okay, not now.", "open": "Opened.", "view": "Opened."}
+NOOP_ACTIONS = {"ok": "Nice. Go for it.", "later": "Okay, not now.", "open": "Opened.", "view": "Opened.", "start": "Let's go."}
 
 # kind -> actions that are real writes (anything in NOOP_ACTIONS is accepted for every kind)
 KIND_ACTIONS: dict[str, tuple[str, ...]] = {
     "task": ("done", "snooze"),
     "checkin": ("lock", "rough"),
     "habit": ("done", "floor", "skip"),
-    "risk": (), "winddown": (), "study": (), "insight": (),
+    "comeback": ("floor",),                    # the one real write: log today's floor version of the offered habit
+    "risk": (), "winddown": (), "study": (), "insight": (), "morning": (),   # morning's "Start" is a no-op that opens the app
 }
 
 
@@ -86,7 +87,7 @@ class ActionsService:
                 msg = await self._task(user_id, action, args)
             elif kind == "checkin":
                 msg = await self._checkin(user_id, action, args)
-            elif kind == "habit":
+            elif kind in ("habit", "comeback"):
                 msg = await self._habit(user_id, action, args)
             else:
                 raise ValidationError(f"{kind} has no action {action!r}.")

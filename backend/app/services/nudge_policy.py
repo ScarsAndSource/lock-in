@@ -41,7 +41,7 @@ class PushMessage:
     tag: str          # same tag replaces the earlier notification instead of stacking
     digest: bool
     # --- actionable pushes (companion layer). All defaulted, so plain task pushes keep working unchanged.
-    kind: str = "task"                      # task | task-digest | checkin | habit | risk | winddown | study
+    kind: str = "task"                      # task | task-digest | checkin | habit | risk | winddown | study | morning | comeback
     key: str | None = None                  # unique moment id; a message with a key is tracked in the push ledger
     args: dict = field(default_factory=dict)  # str -> str, travels inside the signed action token
     actions: tuple[tuple[str, str], ...] = ()  # (action id, button label); max 2 so every platform shows them

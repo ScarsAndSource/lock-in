@@ -446,7 +446,7 @@ class CompanionPush:
     """
     id: UUID
     user_id: UUID
-    kind: str            # task | checkin | habit | risk | winddown | study
+    kind: str            # task | checkin | habit | risk | winddown | study | morning | comeback
     key: str
     local_date: date
     sent_at: datetime
@@ -462,7 +462,7 @@ class CompanionPush:
     """
     id: UUID
     user_id: UUID
-    kind: str            # task | checkin | habit | risk | winddown | study
+    kind: str            # task | checkin | habit | risk | winddown | study | morning | comeback
     key: str
     local_date: date
     sent_at: datetime

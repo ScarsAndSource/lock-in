@@ -10,7 +10,7 @@ class TokenActionRequest(BaseModel):
 
 
 class InAppActionRequest(BaseModel):
-    kind: Literal["task", "checkin", "habit", "risk", "winddown", "study", "insight"]
+    kind: Literal["task", "checkin", "habit", "risk", "winddown", "study", "insight", "morning", "comeback"]
     action: str = Field(min_length=1, max_length=32, pattern=r"^[a-z_]+$")
     args: dict[str, str] = Field(default_factory=dict, max_length=6)
 

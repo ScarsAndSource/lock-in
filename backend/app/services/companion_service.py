@@ -33,12 +33,15 @@ from app.repositories.companion_repository import CompanionRepository
 from app.repositories.goal_repository import GoalRepository
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.sleep_repository import SleepRepository
+from app.repositories.task_repository import TaskRepository
 from app.repositories.urge_repository import UrgeRepository
 from app.services import companion_policy as cp
 from app.services import risk_windows
+from app.services.bounce_back import LOOKBACK_DAYS, compute_bounce_state
 from app.services.intentions_service import DueIntention, IntentionsService, reminder_level
-from app.services.nudge_policy import PushMessage
-from app.services.schedule import check_scheduled, week_start
+from app.services.nudge_policy import PushMessage, classify, in_quiet_hours, min_gap
+from app.services.pause_days import split_pause_days
+from app.services.schedule import check_scheduled, credit, week_start
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
 
@@ -58,11 +61,13 @@ class CompanionPlanner:
     def __init__(
         self, ledger: CompanionRepository, habits: HabitRepository, checkins: CheckinRepository,
         urges: UrgeRepository, sleep: SleepRepository, goals: GoalRepository, study: StudyService,
-        intentions: IntentionsService, stats: StatsService, pauses, insights=None,
+        intentions: IntentionsService, stats: StatsService, pauses,
+        tasks: TaskRepository | None = None, bounce_enabled: bool = True, insights=None,
     ):
         self._ledger, self._habits, self._checkins, self._urges = ledger, habits, checkins, urges
         self._sleep, self._goals, self._study = sleep, goals, study
         self._intentions, self._stats, self._pauses = intentions, stats, pauses
+        self._tasks, self._bounce_enabled = tasks, bounce_enabled   # no task repo: the morning push is habit-only
         self._insights = insights
 
     async def plan(
@@ -130,9 +135,110 @@ class CompanionPlanner:
         if self._insights is not None and f"pulse:{iso}" in sent and f"insight:{iso}" not in sent:
             ctx.fresh_insights = sum(1 for i in await self._insights.list_all(user_id, 10) if i.generated_on == today)
 
+        # ---- morning / comeback: one window, one push; a person who went quiet gets the comeback, not the morning
+        await self._load_morning(ctx, user_id, local, domains, sent)
+
         return cp.plan_companion(ctx)
 
     # ------------------------------------------------------------------ blocks
+    async def _load_morning(self, ctx: cp.CompanionContext, user_id, local: datetime, domains: set, sent: set[str]) -> None:
+        prefs, today = ctx.prefs, local.date()
+        iso = today.isoformat()
+        if f"morning:{iso}" in sent or f"comeback:{iso}" in sent:
+            return                                                  # this moment already went out today
+        if local.hour >= prefs.nudge_hour or in_quiet_hours(local.time(), prefs.quiet_start, prefs.quiet_end):
+            return                                                  # the window can only exist before the habit-nudge hour
+        if not cp.morning_possible(ctx.now, ctx.tz, prefs):
+            return                                                  # no wake time could open it now: skip the sleep read
+        logs = await self._sleep.list_logs_in_range(user_id, today - timedelta(days=BEDTIME_LOOKBACK_DAYS), today)
+        real = [l for l in logs if not l.is_default]                # guesses are never evidence
+        ctx.wake = cp.median_wake([l.time_woke for l in real if l.time_woke is not None])
+        if not cp.morning_window_open(ctx.now, ctx.tz, prefs, ctx.wake):
+            return                                                  # nobody pays for the heavy reads outside the window
+        ctx.comeback = await self._comeback_info(user_id, today, frozenset(l.log_date for l in real))
+        if ctx.comeback is not None:
+            return                                                  # silent: the comeback cadence owns the morning
+        if cp.is_muted(ctx.ledger, "morning", ctx.now, ctx.confirmed_dates):
+            return
+        ctx.morning_pick = await self._morning_pick(ctx, user_id, today, domains)
+
+    async def _morning_pick(self, ctx: cp.CompanionContext, user_id, today: date, domains: set) -> cp.MorningPick | None:
+        tasks = await self._due_tasks(ctx, user_id, today)
+        if any(t.importance >= 2 for t in tasks):
+            return cp.pick_morning(tasks, [], [])                   # a task wins: skip the habit reads
+        habits = await self._open_habits(user_id, today, with_consistency=True)
+        cues = _cues(await self._intentions.due(user_id, "habit", today)) if habits and "habit" in domains else []
+        return cp.pick_morning(tasks, habits, cues)
+
+    async def _due_tasks(self, ctx: cp.CompanionContext, user_id, today: date) -> list[cp.OpenTask]:
+        """Open tasks due today or overdue that the normal task nudges are NOT about to push right now (so the
+        person never gets the same task twice within one run)."""
+        if self._tasks is None:
+            return []
+        out: list[cp.OpenTask] = []
+        for t in await self._tasks.list(user_id, "open"):
+            if t.importance < 2 or t.due_at is None:
+                continue                                            # small chores ride in the digest; backlog never pushes
+            state = classify(t, ctx.now, ctx.prefs, ctx.tz)
+            if state not in ("due", "upcoming"):
+                continue                                            # snoozed / nudged out / not triggered at all
+            if state == "due" and (t.last_nudged_at is None or ctx.now - t.last_nudged_at >= min_gap(t)):
+                continue                                            # the task flow pushes this one itself
+            due_day = t.due_at.astimezone(ctx.tz).date()
+            if due_day > today:
+                continue
+            out.append(cp.OpenTask(
+                task_id=t.id, title=t.title, importance=t.importance, due_at=t.due_at, overdue=due_day < today,
+            ))
+        return out
+
+    async def _comeback_info(self, user_id, today: date, sleep_days: frozenset[date]) -> cp.ComebackInfo | None:
+        """Silent = bounce_back says the last 2+ scheduled days slipped AND nothing real was logged (habit or sleep)
+        on the last 2+ days. Returns None for someone who is already back today, or who never started."""
+        if not self._bounce_enabled:
+            return None
+        habits = await self._habits.list_active_habits(user_id)
+        if not habits:
+            return None
+        start = today - timedelta(days=LOOKBACK_DAYS)
+        logs = await self._habits.get_logs_in_range(user_id, [h.id for h in habits], start, today)
+        if any(l.log_date == today and not l.is_default for l in logs):
+            return None                                             # they are already back today
+        covering = await self._pauses.list_overlapping(user_id, start, today) if self._pauses is not None else []
+        global_days, by_habit = split_pause_days(covering, start, today)
+        if today in global_days:
+            return None
+        state = compute_bounce_state(habits, logs, today, global_days, by_habit)
+        if not state.active or state.slip_streak < cp.COMEBACK_MIN_SILENT_DAYS:
+            return None
+        real_days = {l.log_date for l in logs if not l.is_default} | set(sleep_days)
+        silent, day = 0, today - timedelta(days=1)
+        while silent < LOOKBACK_DAYS and day not in real_days:
+            silent += 1
+            day -= timedelta(days=1)
+        if silent < cp.COMEBACK_MIN_SILENT_DAYS:
+            return None                                             # slipped, but they are still showing up
+        # Restart with the habit they were most steady on (the easiest win), floor version only.
+        mine: dict = {}
+        for l in logs:
+            mine.setdefault(l.habit_id, []).append(l)
+        best = None
+        for h in habits:
+            if today in by_habit.get(h.id, frozenset()):
+                continue
+            history = mine.get(h.id, [])
+            if not check_scheduled(h.target_frequency, today, [l for l in history if l.log_date < today]).scheduled:
+                continue
+            score = sum(credit(l.status) for l in history if not l.is_default and l.log_date < today)
+            key = (-score, h.floor_text is None, h.name)
+            if best is None or key < best[0]:
+                best = (key, h)
+        if best is None:                                            # nothing scheduled today: still silent, nothing to offer
+            return cp.ComebackInfo(habit_id=None, name="", floor_text=None, silent_days=silent, slip_streak=state.slip_streak)
+        h = best[1]
+        return cp.ComebackInfo(
+            habit_id=h.id, name=h.name, floor_text=h.floor_text, silent_days=silent, slip_streak=state.slip_streak,
+        )
     async def _open_habits(self, user_id, today: date, *, with_consistency: bool) -> list[cp.OpenHabit]:
         habits = await self._habits.list_active_habits(user_id)
         if not habits:
