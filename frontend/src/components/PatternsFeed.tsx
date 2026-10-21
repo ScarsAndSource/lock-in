@@ -6,9 +6,9 @@ export const PatternsFeed: React.FC = () => {
   const [patterns, setPatterns] = useState<Pattern[]>([]);
 
   useEffect(() => {
-    getPatterns(30).then((res) => {
-      setPatterns(res.patterns);
-    });
+    getPatterns(30)
+      .then((res) => setPatterns(res.patterns))
+      .catch(() => setPatterns([]));
   }, []);
 
   return (
@@ -18,6 +18,9 @@ export const PatternsFeed: React.FC = () => {
         <span className="font-caption text-caption text-muted-text">30-day window</span>
       </div>
 
+      {patterns.length === 0 && (
+        <p className="font-small text-muted-text">No patterns yet. They show up after a couple of weeks of logs.</p>
+      )}
       <div className="space-y-3">
         {patterns.map((p) => {
           const impactMultiplier = (p.rate_after_trigger / Math.max(p.baseline_rate, 0.01)).toFixed(1);

@@ -9,7 +9,9 @@ export const InsightsFeed: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const loadData = () => {
-    getInsights().then(setInsights);
+    getInsights()
+      .then(setInsights)
+      .catch(() => setInsights([]));
   };
 
   useEffect(() => {
@@ -22,7 +24,7 @@ export const InsightsFeed: React.FC = () => {
       setInsights((prev) =>
         prev.map((i) => (i.id === id ? { ...i, user_feedback: feedback } : i))
       );
-      showToast('Feedback noted — models calibrated.');
+      showToast('Thanks, noted.');
     } catch {
       showToast('Feedback saved locally');
     }
@@ -34,6 +36,8 @@ export const InsightsFeed: React.FC = () => {
       await refreshInsights();
       loadData();
       showToast('Insights refreshed from latest logs');
+    } catch {
+      showToast('Could not refresh insights');
     } finally {
       setIsRefreshing(false);
     }
@@ -45,7 +49,7 @@ export const InsightsFeed: React.FC = () => {
         <div>
           <h3 className="font-section text-section text-ink">AI Pattern Insights</h3>
           <p className="font-caption text-caption text-muted-text">
-            Voice & Tone ceiling: blunt about data, zero shaming
+            Blunt about the data, never shaming
           </p>
         </div>
         <button
@@ -61,6 +65,9 @@ export const InsightsFeed: React.FC = () => {
         </button>
       </div>
 
+      {insights.length === 0 && (
+        <p className="font-small text-muted-text">No insights yet. Tap refresh once you have a week of logs.</p>
+      )}
       <div className="space-y-3">
         {insights.map((item) => (
           <div

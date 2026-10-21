@@ -113,6 +113,17 @@ export default {
         "title": ["28px", { lineHeight: "32px", letterSpacing: "-0.02em", fontWeight: "600" }],
         "display-xl-mobile": ["40px", { lineHeight: "44px", letterSpacing: "-0.02em", fontWeight: "600" }],
       },
+      keyframes: {
+        fadeIn: { from: { opacity: "0" }, to: { opacity: "1" } },
+        slideUp: {
+          from: { opacity: "0", transform: "translateY(16px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        fadeIn: "fadeIn 180ms ease-out",
+        slideUp: "slideUp 220ms ease-out",
+      },
     },
   },
   plugins: [],

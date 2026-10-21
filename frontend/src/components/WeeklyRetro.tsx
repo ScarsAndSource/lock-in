@@ -166,9 +166,9 @@ export const WeeklyRetro: React.FC = () => {
       <div className="bg-surface rounded-xl p-5 border border-line shadow-sm space-y-3">
         <div>
           <span className="font-caption text-caption text-muted-text uppercase tracking-wider block">
-            Weekly Protocol Review
+            Weekly review
           </span>
-          <h3 className="font-title text-title text-ink text-xl">No retro yet</h3>
+          <h3 className="font-title text-title text-ink text-xl">No review yet</h3>
         </div>
         <p className="font-small text-muted-text">
           Your retro reads last week&rsquo;s logs and names the chain behind any slip. Generate it once the week is done.
@@ -194,7 +194,7 @@ export const WeeklyRetro: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <span className="font-caption text-caption text-muted-text uppercase tracking-wider block">
-            Weekly Protocol Review
+            Weekly review
           </span>
           <h3 className="font-title text-title text-ink text-xl">
             Week of {retro.week_start}
@@ -229,7 +229,7 @@ export const WeeklyRetro: React.FC = () => {
       {/* Concrete next step */}
       <div className="p-3 bg-surface-container-low rounded-lg border border-surface-container">
         <span className="font-caption text-caption text-muted-text uppercase tracking-wider block mb-0.5">
-          Priority Focus For Upcoming Week
+          Focus for next week
         </span>
         <p className="font-small text-small text-ink font-semibold">{retro.next_step}</p>
       </div>

@@ -51,7 +51,7 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
       <div className="w-full max-w-md bg-ground-chalk rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-line animate-slideUp space-y-4">
         <div className="flex items-center justify-between">
           <div>

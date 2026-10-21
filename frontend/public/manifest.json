@@ -1,7 +1,7 @@
 {
-  "name": "Lock'in Weave",
+  "name": "Lock'in",
   "short_name": "Lock'in",
-  "description": "Unified cross-domain continuity, habit discipline, and pattern discovery",
+  "description": "A companion for habits, sleep, study and the urges you are working on",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F6F6F2",

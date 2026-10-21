@@ -1,222 +1,213 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { getChain } from '../api/stats';
-import { ChainDomainStatus } from '../types';
+import type { ChainDomainStatus } from '../types';
 import { formatDayShort, weekdayLetter } from '../lib/dates';
 import { toWeaveStatus } from '../lib/format';
 
-export interface DayColumnData {
-  dayLabel: string;
-  dateStr: string;
+type DomainId = 'habits' | 'sleep' | 'screen' | 'study' | 'urges';
+
+interface DayColumn {
   iso: string;
-  isToday?: boolean;
-  habits: ChainDomainStatus;
-  sleep: ChainDomainStatus;
-  screen: ChainDomainStatus;
-  study: ChainDomainStatus;
-  urges: ChainDomainStatus;
+  letter: string;
+  short: string;
+  isToday: boolean;
+  s: Record<DomainId, ChainDomainStatus>;
 }
+
+const DOMAINS: { id: DomainId; label: string; fill: string; tint: string; stroke: string }[] = [
+  { id: 'habits', label: 'Habits', fill: 'bg-domain-habits-fill', tint: 'bg-domain-habits-tint', stroke: '#C84A21' },
+  { id: 'sleep', label: 'Sleep', fill: 'bg-domain-sleep-fill', tint: 'bg-domain-sleep-tint', stroke: '#1D5F73' },
+  { id: 'screen', label: 'Screen', fill: 'bg-domain-screen-fill', tint: 'bg-domain-screen-tint', stroke: '#E0A21B' },
+  { id: 'study', label: 'Study', fill: 'bg-domain-study-fill', tint: 'bg-domain-study-tint', stroke: '#4F7A2E' },
+  { id: 'urges', label: 'Urges', fill: 'bg-domain-urges-fill', tint: 'bg-domain-urges-tint', stroke: '#92405F' },
+];
+
+const WORD: Record<ChainDomainStatus, string> = { good: 'good', partial: 'partial', missed: 'missed', none: 'not logged' };
+
+/** One state per day: the mean of whatever was logged (good 1, partial 0.5, missed 0). */
+function overall(s: DayColumn['s']): ChainDomainStatus {
+  const known = DOMAINS.map((d) => s[d.id]).filter((v) => v !== 'none');
+  if (known.length === 0) return 'none';
+  const score = known.reduce((sum, v) => sum + (v === 'good' ? 1 : v === 'partial' ? 0.5 : 0), 0) / known.length;
+  return score >= 0.75 ? 'good' : score >= 0.4 ? 'partial' : 'missed';
+}
+
+const Dot: React.FC<{ status: ChainDomainStatus }> = ({ status }) => {
+  if (status === 'good') return <span className="block w-3.5 h-3.5 rounded-full bg-ink" />;
+  if (status === 'partial') {
+    return (
+      <span
+        className="block w-3.5 h-3.5 rounded-full border-2 border-ink"
+        style={{ background: 'linear-gradient(to top, #1B1C1A 50%, #eeeeea 50%)' }}
+      />
+    );
+  }
+  if (status === 'missed') return <span className="block w-3.5 h-3.5 rounded-full border-2 border-ink bg-surface" />;
+  return <span className="block w-2.5 h-[2px] bg-outline-variant" />;
+};
+
+const Cell: React.FC<{ status: ChainDomainStatus; fill: string; tint: string; stroke: string }> = ({
+  status,
+  fill,
+  tint,
+  stroke,
+}) => {
+  if (status === 'good') return <div className={`w-[20px] h-[14px] rounded ${fill}`} />;
+  if (status === 'partial') {
+    return (
+      <div className={`w-[20px] h-[14px] rounded ${tint} overflow-hidden flex flex-col justify-end`}>
+        <div className={`h-[7px] w-full ${fill}`} />
+      </div>
+    );
+  }
+  if (status === 'missed') {
+    return (
+      <svg width="20" height="14" viewBox="0 0 20 14">
+        <rect fill="none" height="12" rx="3" stroke={stroke} strokeWidth="1.5" width="18" x="1" y="1" />
+      </svg>
+    );
+  }
+  return (
+    <div className="w-[20px] h-[14px] flex items-center justify-center">
+      <div className="w-3 h-[1px] bg-outline-variant" />
+    </div>
+  );
+};
 
 interface SevenDayWeaveProps {
-  onSelectDay?: (iso: string) => void;
+  days?: number;
+  defaultExpanded?: boolean;
 }
 
-export const SevenDayWeave: React.FC<SevenDayWeaveProps> = ({ onSelectDay }) => {
+/** Collapsed: one dot per day. Expanded: the five-domain grid with a day detail on tap. */
+export const SevenDayWeave: React.FC<SevenDayWeaveProps> = ({ days = 7, defaultExpanded = false }) => {
   const { activeDate, dataEpoch, demoMode } = useApp();
-  const [days, setDays] = useState<DayColumnData[]>([]);
+  const [cols, setCols] = useState<DayColumn[]>([]);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    getChain(7, activeDate)
+    getChain(days, activeDate)
       .then((res) => {
         if (cancelled) return;
-        const cols = res.days.slice(-7).map((d) => ({
-          dayLabel: weekdayLetter(d.day),
-          dateStr: formatDayShort(d.day),
-          iso: d.day,
-          isToday: d.day === activeDate,
-          habits: toWeaveStatus(d.habits),
-          sleep: toWeaveStatus(d.sleep),
-          screen: toWeaveStatus(d.screen_time),
-          study: toWeaveStatus(d.study),
-          urges: toWeaveStatus(d.urges),
-        }));
-        setDays(cols);
+        setCols(
+          res.days.slice(-days).map((d) => ({
+            iso: d.day,
+            letter: weekdayLetter(d.day),
+            short: formatDayShort(d.day),
+            isToday: d.day === activeDate,
+            s: {
+              habits: toWeaveStatus(d.habits),
+              sleep: toWeaveStatus(d.sleep),
+              screen: toWeaveStatus(d.screen_time),
+              study: toWeaveStatus(d.study),
+              urges: toWeaveStatus(d.urges),
+            },
+          }))
+        );
       })
       .catch(() => {
-        if (!cancelled) setDays([]);
+        if (!cancelled) setCols([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [activeDate, dataEpoch, demoMode]);
+  }, [days, activeDate, dataEpoch, demoMode]);
 
-  const selectedDay = days.find((d) => d.iso === selectedIso) || null;
-
-  const handleDayClick = (day: DayColumnData) => {
-    setSelectedIso(selectedIso === day.iso ? null : day.iso);
-    onSelectDay?.(day.iso);
-  };
-
-  const renderCell = (
-    status: ChainDomainStatus,
-    domainFill: string,
-    domainTint: string,
-    domainStroke: string,
-    isToday: boolean
-  ) => {
-    if (status === 'good') {
-      return <div className={`w-[20px] h-[14px] rounded ${domainFill}`} />;
-    }
-    if (status === 'partial') {
-      return (
-        <div className={`w-[20px] h-[14px] rounded ${domainTint} overflow-hidden flex flex-col justify-end`}>
-          <div className={`h-[7px] w-full ${domainFill}`} />
-        </div>
-      );
-    }
-    if (status === 'missed') {
-      return (
-        <div className="w-[20px] h-[14px] rounded bg-transparent flex items-center justify-center">
-          <svg className="w-full h-full" height="14" viewBox="0 0 20 14" width="20">
-            <rect fill="none" height="12" rx="3" stroke={domainStroke} strokeWidth="1.5" width="18" x="1" y="1" />
-          </svg>
-        </div>
-      );
-    }
-    return (
-      <div className="w-[20px] h-[14px] flex items-center justify-center">
-        <div className={`w-3 h-[1px] ${isToday ? 'bg-ink' : 'bg-outline-variant'}`} />
-      </div>
-    );
-  };
+  const selected = cols.find((c) => c.iso === selectedIso) ?? null;
+  const title = days === 7 ? 'This week' : `Last ${days} days`;
 
   return (
-    <section className="w-full bg-surface rounded-xl p-4 mb-6 shadow-sm border border-line">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-section text-section text-ink">Recent days</h3>
-        <span className="font-caption text-caption text-muted-text tracking-wide uppercase">Past 7 days</span>
-      </div>
-
-      {days.length === 0 ? (
-        <p className="font-caption text-caption text-muted-text py-2">No chain data yet.</p>
-      ) : (
-        <div className="flex items-stretch justify-between gap-2 overflow-x-auto pb-1">
-          <div className="flex flex-col justify-between py-1 pr-1 shrink-0 select-none">
-            <div className="h-[14px] flex items-center gap-2" title="Habits">
-              <svg className="shrink-0" height="12" viewBox="0 0 12 12" width="12">
-                <circle cx="6" cy="6" fill="#C84A21" r="5" />
-              </svg>
-              <span className="font-caption text-caption text-muted-text">Habits</span>
-            </div>
-            <div className="h-[14px] flex items-center gap-2" title="Sleep">
-              <svg className="shrink-0" height="12" viewBox="0 0 12 12" width="12">
-                <path d="M 6 1 A 5 5 0 0 1 6 11 Z" fill="#1D5F73" />
-              </svg>
-              <span className="font-caption text-caption text-muted-text">Sleep</span>
-            </div>
-            <div className="h-[14px] flex items-center gap-2" title="Screen">
-              <svg className="shrink-0" height="12" viewBox="0 0 12 12" width="12">
-                <rect fill="#E0A21B" height="10" rx="2" width="8" x="2" y="1" />
-              </svg>
-              <span className="font-caption text-caption text-muted-text">Screen</span>
-            </div>
-            <div className="h-[14px] flex items-center gap-2" title="Study">
-              <svg className="shrink-0" height="12" viewBox="0 0 12 12" width="12">
-                <polygon fill="#4F7A2E" points="6,1 11,10 1,10" />
-              </svg>
-              <span className="font-caption text-caption text-muted-text">Study</span>
-            </div>
-            <div className="h-[14px] flex items-center gap-2" title="Urges">
-              <svg className="shrink-0" height="12" viewBox="0 0 12 12" width="12">
-                <path d="M 1 6 Q 3.5 2 6 6 T 11 6" fill="none" stroke="#92405F" strokeLinecap="round" strokeWidth="2" />
-              </svg>
-              <span className="font-caption text-caption text-muted-text">Urges</span>
-            </div>
-          </div>
-
-          <div className="flex items-start justify-end gap-2.5 flex-1">
-            {days.map((col) => {
-              const isSelected = selectedIso === col.iso;
-              return (
-                <button
-                  type="button"
-                  key={col.iso}
-                  onClick={() => handleDayClick(col)}
-                  className={`flex flex-col items-center group transition-transform ${
-                    isSelected ? 'scale-105' : 'hover:opacity-90'
-                  }`}
-                  title={`${col.dateStr}`}
-                >
-                  <span
-                    className={`font-caption text-caption mb-2 ${
-                      col.isToday ? 'text-ink font-semibold' : 'text-muted-text'
-                    }`}
-                  >
-                    {col.dayLabel}
-                  </span>
-                  <div className="flex flex-col gap-[3px]">
-                    {renderCell(col.habits, 'bg-domain-habits-fill', 'bg-domain-habits-tint', '#C84A21', !!col.isToday)}
-                    {renderCell(col.sleep, 'bg-domain-sleep-fill', 'bg-domain-sleep-tint', '#1D5F73', !!col.isToday)}
-                    {renderCell(col.screen, 'bg-domain-screen-fill', 'bg-domain-screen-tint', '#E0A21B', !!col.isToday)}
-                    {renderCell(col.study, 'bg-domain-study-fill', 'bg-domain-study-tint', '#4F7A2E', !!col.isToday)}
-                    {renderCell(col.urges, 'bg-domain-urges-fill', 'bg-domain-urges-tint', '#92405F', !!col.isToday)}
-                  </div>
-                  <div
-                    className={`w-full h-[2px] mt-2 transition-colors ${
-                      col.isToday ? 'bg-ink' : isSelected ? 'bg-secondary' : 'bg-transparent'
-                    }`}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {selectedDay && (
-        <div className="mt-3 p-3 bg-surface-container-low rounded-lg text-small border border-surface-container flex items-center justify-between animate-fadeIn">
-          <div>
-            <span className="font-small-medium text-ink block">{selectedDay.dateStr} Overview</span>
-            <span className="font-caption text-caption text-muted-text">
-              Habits: {selectedDay.habits} · Sleep: {selectedDay.sleep} · Screen: {selectedDay.screen}
+    <section className="w-full bg-surface rounded-xl border border-line overflow-hidden">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-4 pt-3 pb-3 text-left"
+      >
+        <span className="flex items-center justify-between">
+          <span className="font-section text-section text-ink">{title}</span>
+          <span className="flex items-center gap-1 font-caption text-caption text-muted-text">
+            {expanded ? 'Hide detail' : 'Detail'}
+            <span className={`material-symbols-outlined text-[18px] transition-transform ${expanded ? 'rotate-180' : ''}`}>
+              expand_more
             </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSelectedIso(null)}
-            className="text-caption text-muted-text hover:text-ink font-medium px-2 py-1"
-          >
-            Dismiss
-          </button>
+          </span>
+        </span>
+        {!expanded &&
+          (cols.length === 0 ? (
+            <span className="block font-caption text-caption text-muted-text pt-2">No data yet.</span>
+          ) : (
+            <span className="flex items-end justify-between pt-3">
+              {cols.map((c) => (
+                <span
+                  key={c.iso}
+                  title={`${c.short}: ${DOMAINS.map((d) => `${d.label} ${WORD[c.s[d.id]]}`).join(', ')}`}
+                  className="flex flex-col items-center gap-2 flex-1"
+                >
+                  <Dot status={overall(c.s)} />
+                  <span className={`font-caption text-caption ${c.isToday ? 'text-ink font-semibold' : 'text-muted-text'}`}>
+                    {c.letter}
+                  </span>
+                </span>
+              ))}
+            </span>
+          ))}
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4">
+          {cols.length === 0 ? (
+            <p className="font-caption text-caption text-muted-text">No data yet.</p>
+          ) : (
+            <div className="flex items-stretch gap-3 overflow-x-auto pb-1">
+              <div className="flex flex-col justify-between pt-6 pb-1 shrink-0 select-none">
+                {DOMAINS.map((d) => (
+                  <div key={d.id} className="h-[14px] flex items-center font-caption text-caption text-muted-text">
+                    {d.label}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-start gap-2.5 flex-1 justify-end">
+                {cols.map((c) => (
+                  <button
+                    key={c.iso}
+                    type="button"
+                    title={c.short}
+                    onClick={() => setSelectedIso(selectedIso === c.iso ? null : c.iso)}
+                    className="flex flex-col items-center"
+                  >
+                    <span className={`font-caption text-caption mb-2 ${c.isToday ? 'text-ink font-semibold' : 'text-muted-text'}`}>
+                      {c.letter}
+                    </span>
+                    <div className="flex flex-col gap-[3px]">
+                      {DOMAINS.map((d) => (
+                        <Cell key={d.id} status={c.s[d.id]} fill={d.fill} tint={d.tint} stroke={d.stroke} />
+                      ))}
+                    </div>
+                    <div className={`w-full h-[2px] mt-2 ${c.isToday ? 'bg-ink' : selectedIso === c.iso ? 'bg-secondary' : 'bg-transparent'}`} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selected && (
+            <div className="mt-3 p-3 bg-surface-container-low rounded-lg border border-surface-container animate-fadeIn">
+              <span className="font-small-medium text-small-medium text-ink block">{selected.short}</span>
+              <span className="font-caption text-caption text-muted-text">
+                {DOMAINS.map((d) => `${d.label}: ${WORD[selected.s[d.id]]}`).join(' · ')}
+              </span>
+            </div>
+          )}
+
+          <p className="font-caption text-caption text-muted-text pt-3">
+            Filled = good · half = partial · outline = missed · dash = not logged
+          </p>
         </div>
       )}
-
-      <div className="flex flex-wrap items-center justify-between gap-y-2 pt-4 mt-3 bg-surface-container-low p-2.5 rounded">
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-sm bg-ink" />
-          <span className="font-caption text-caption text-ink">Good</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-sm bg-secondary-fixed flex flex-col justify-end overflow-hidden">
-            <div className="w-full h-1 bg-ink" />
-          </div>
-          <span className="font-caption text-caption text-ink">Partial</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-2.5 rounded-sm bg-surface flex items-center justify-center">
-            <svg height="10" viewBox="0 0 10 10" width="10">
-              <rect fill="none" height="9" stroke="#1B1C1A" strokeWidth="1" width="9" x="0.5" y="0.5" />
-            </svg>
-          </div>
-          <span className="font-caption text-caption text-ink">Missed</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2.5 h-[1px] bg-outline" />
-          <span className="font-caption text-caption text-ink">Not logged</span>
-        </div>
-      </div>
     </section>
   );
 };

@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { confirmCheckin, getJournal } from '../api/checkins';
 import { fetchSupport } from '../api/support';
+import { Sheet } from './Sheet';
+import { Disclosure } from './Disclosure';
 import { SupportCard } from './SupportCard';
+import { BounceCard } from './BounceCard';
 import { MoodPicker } from './MoodPicker';
-import { HabitStatus, CheckinOverride, SupportPayload } from '../types';
+import type { HabitStatus, CheckinOverride, SupportPayload } from '../types';
 import { toTimeInput } from '../lib/dates';
-import { errorMessage } from '../lib/format';
+import { errorMessage, formatMinutes, habitStatusLabel, habitTierOptions, tierHint } from '../lib/format';
 
 interface CheckinModalProps {
   isOpen: boolean;
@@ -38,6 +41,15 @@ const CRISIS_FLAGS = [
 ];
 
 const normalizeForCrisis = (text: string): string => text.toLowerCase().replace(/[\u2019'`]/g, '');
+
+/** Minutes asleep from two "HH:MM" clock values, wrapping past midnight. Null when either is missing. */
+function sleepMinutes(bed: string, wake: string): number | null {
+  const [bh, bm] = bed.split(':').map(Number);
+  const [wh, wm] = wake.split(':').map(Number);
+  if (![bh, bm, wh, wm].every(Number.isFinite)) return null;
+  const diff = (wh * 60 + wm - (bh * 60 + bm) + 1440) % 1440;
+  return diff;
+}
 
 export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) => {
   const { checkinView, activeDate, refreshCheckinView, bumpData, showToast, profile } = useApp();
@@ -115,6 +127,12 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
 
   if (!isOpen) return null;
 
+  const confirmed = checkinView?.already_confirmed ?? false;
+  const entries = checkinView?.entries || [];
+  const scheduledCount = entries.filter((e) => e.is_scheduled !== false).length;
+  const editedHabits = Object.keys(habitOverrides).length;
+  const anyEdit = sleepDirty || screenDirty || editedHabits > 0;
+
   const handleConfirm = async () => {
     setIsSubmitting(true);
     try {
@@ -140,11 +158,11 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
         accept_screen_time_default: !screenDirty,
       });
 
-      showToast(checkinView?.already_confirmed ? 'Check-in updated' : 'Daily check-in locked in');
+      showToast(confirmed ? 'Check-in updated' : 'Locked in');
       bumpData();
       await refreshCheckinView();
       if (result.support) {
-        // Keep the modal open on the resources: closing here would hide exactly what the user needs to see.
+        // Keep the sheet open on the resources: closing here would hide exactly what the user needs to see.
         setSavedSupport(result.support);
       } else {
         onClose();
@@ -156,82 +174,107 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4">
-      <div className="w-full max-w-md bg-ground-chalk rounded-t-2xl sm:rounded-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-line animate-slideUp">
-        <div className="p-4 bg-surface border-b border-surface-container flex items-center justify-between shrink-0">
-          <div>
-            <span className="font-caption text-caption text-muted-text uppercase tracking-wider block">
-              Opt-Out Daily Check-in
-            </span>
-            <h2 className="font-title text-title text-ink text-xl">Today's Protocol</h2>
-          </div>
+  const sleepLogged = checkinView?.sleep.logged ?? null;
+  const sleepMin = sleepDirty ? sleepMinutes(bedtime, wakeTime) : sleepLogged?.duration_minutes ?? sleepMinutes(bedtime, wakeTime);
+  const sleepSummary = `${formatMinutes(sleepMin)}${!sleepDirty && (sleepLogged?.is_default ?? true) ? ' · usual' : ''}`;
+  const screenLogged = checkinView?.screen_time.logged ?? null;
+  const screenSummary = `${formatMinutes(screenMinutes)}${!screenDirty && (screenLogged?.is_default ?? true) ? ' · usual' : ''}`;
+  const habitSummary = editedHabits > 0 ? `${editedHabits} changed` : `${scheduledCount} as usual`;
+  const moodSummary = mood.valence !== null && mood.energy !== null ? `Felt ${mood.valence}/5 · energy ${mood.energy}/5` : 'Optional';
+
+  const field = 'w-full bg-surface-container-low border border-line rounded-lg px-2.5 py-1.5 font-small text-ink';
+
+  if (savedSupport) {
+    return (
+      <Sheet
+        open={isOpen}
+        onClose={onClose}
+        title="Saved"
+        footer={
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-ink hover:bg-secondary-fixed transition-colors"
+            className="w-full h-12 bg-ink text-ground-chalk rounded-xl font-body-strong text-body-strong active:bg-secondary transition-colors"
           >
-            <span className="material-symbols-outlined text-[18px]">close</span>
+            Done
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-surface-container rounded-lg flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-ink text-[20px]">check_circle</span>
+            <p className="font-small text-small text-ink">Your check-in is saved.</p>
+          </div>
+          <SupportCard support={savedSupport} />
+        </div>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet
+      open={isOpen}
+      onClose={onClose}
+      title={confirmed ? 'Today’s check-in' : 'Close today'}
+      eyebrow="Defaults cover the usual"
+      footer={
+        <div className="space-y-2">
+          <button
+            type="button"
+            disabled={isSubmitting || !checkinView}
+            onClick={() => void handleConfirm()}
+            className="w-full h-12 bg-ink text-ground-chalk rounded-xl font-body-strong text-body-strong flex items-center justify-center gap-2 active:bg-secondary transition-colors disabled:opacity-50"
+          >
+            <span>
+              {isSubmitting ? 'Saving…' : confirmed ? 'Update check-in' : anyEdit ? 'Lock it in with my changes' : 'Lock it in'}
+            </span>
+            <span className="material-symbols-outlined text-[18px]">check</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-1.5 text-center font-caption text-caption text-muted-text hover:text-ink transition-colors"
+          >
+            Cancel
           </button>
         </div>
+      }
+    >
+      {!checkinView ? (
+        <p className="font-small text-muted-text">Loading today…</p>
+      ) : (
+        <div className="space-y-3">
+          <BounceCard bounce={checkinView.bounce} />
+          <p className="font-small text-small text-muted-text">Change only what was different today.</p>
 
-        {savedSupport ? (
-          <>
-            <div className="p-4 overflow-y-auto space-y-4 flex-1">
-              <div className="p-3 bg-surface-container rounded-lg flex items-center gap-2.5">
-                <span className="material-symbols-outlined text-ink text-[20px]">check_circle</span>
-                <p className="font-small text-small text-ink">Your check-in is saved.</p>
-              </div>
-              <SupportCard support={savedSupport} />
-            </div>
-            <div className="p-4 bg-surface border-t border-surface-container shrink-0">
-              <button
-                type="button"
-                onClick={onClose}
-                className="w-full h-12 bg-ink text-ground-chalk rounded-xl font-body-strong text-body-strong active:bg-secondary transition-colors"
-              >
-                Done
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-        <div className="p-4 overflow-y-auto space-y-5 flex-1">
-          <div className="p-3 bg-surface-container rounded-lg flex items-center gap-2.5">
-            <span className="material-symbols-outlined text-ink text-[20px]">verified</span>
-            <p className="font-small text-small text-ink">
-              Defaults seeded from your declared rhythm. Touch only what was different today.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">Habits Scheduled</h3>
-            <div className="space-y-2">
-              {(checkinView?.entries || []).map((entry) => {
+          <Disclosure title="Habits" summary={habitSummary}>
+            <div className="space-y-2 pt-2">
+              {entries.length === 0 && <p className="font-small text-muted-text">No habits scheduled today.</p>}
+              {entries.map((entry) => {
                 const currentStatus = habitOverrides[entry.habit_id] ?? entry.status;
+                const hint = tierHint(entry.floor_text, entry.stretch_text);
                 return (
-                  <div
-                    key={entry.habit_id}
-                    className="p-3 bg-surface rounded-xl border border-line flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
+                  <div key={entry.habit_id} className="p-3 bg-surface-container-low rounded-xl space-y-2">
+                    <div className="min-w-0">
                       <span className="font-small-medium text-ink block truncate">{entry.habit_name}</span>
-                      <span className="font-caption text-muted-text text-[11px] block">{entry.reason}</span>
+                      {hint && <span className="font-caption text-caption text-muted-text block">{hint}</span>}
                     </div>
                     {entry.is_scheduled === false && currentStatus === null ? (
                       <span className="font-caption text-caption text-muted-text">Rest day</span>
                     ) : (
-                      <div className="flex items-center bg-surface-container p-0.5 rounded-lg shrink-0">
-                        {(['done', 'partial', 'skipped'] as HabitStatus[]).map((status) => (
+                      <div className="flex flex-wrap gap-1.5">
+                        {habitTierOptions(currentStatus).map((status) => (
                           <button
                             key={status}
                             type="button"
                             onClick={() => setHabitOverrides((prev) => ({ ...prev, [entry.habit_id]: status }))}
-                            className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
-                              currentStatus === status ? 'bg-ink text-ground-chalk' : 'text-ink'
+                            className={`px-3 h-8 rounded-lg font-caption text-caption transition-colors ${
+                              currentStatus === status
+                                ? 'bg-ink text-ground-chalk font-semibold'
+                                : 'bg-surface text-ink border border-line'
                             }`}
                           >
-                            {status === 'done' ? 'Done' : status === 'partial' ? 'Part' : 'Miss'}
+                            {habitStatusLabel(status)}
                           </button>
                         ))}
                       </div>
@@ -240,11 +283,10 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                 );
               })}
             </div>
-          </div>
+          </Disclosure>
 
-          <div className="space-y-2">
-            <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">Sleep Rhythm</h3>
-            <div className="p-3 bg-surface rounded-xl border border-line space-y-3">
+          <Disclosure title="Sleep" summary={sleepSummary}>
+            <div className="space-y-3 pt-2">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-caption text-caption text-muted-text block mb-1">To bed</label>
@@ -255,7 +297,7 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                       setBedtime(e.target.value);
                       setSleepDirty(true);
                     }}
-                    className="w-full bg-surface-container-low border border-line rounded-lg px-2.5 py-1.5 font-small text-ink"
+                    className={field}
                   />
                 </div>
                 <div>
@@ -267,7 +309,7 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                       setWakeTime(e.target.value);
                       setSleepDirty(true);
                     }}
-                    className="w-full bg-surface-container-low border border-line rounded-lg px-2.5 py-1.5 font-small text-ink"
+                    className={field}
                   />
                 </div>
               </div>
@@ -288,16 +330,13 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                 />
               </div>
             </div>
-          </div>
+          </Disclosure>
 
-          <div className="space-y-2">
-            <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">Screen Time</h3>
-            <div className="p-3 bg-surface rounded-xl border border-line space-y-2">
+          <Disclosure title="Screen time" summary={screenSummary}>
+            <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between">
-                <span className="font-small text-ink">Total minutes</span>
-                <span className="font-small-medium text-ink font-semibold">
-                  {Math.floor(screenMinutes / 60)}h {screenMinutes % 60}m ({screenMinutes} min)
-                </span>
+                <span className="font-small text-ink">Total today</span>
+                <span className="font-small-medium text-ink font-semibold">{formatMinutes(screenMinutes)}</span>
               </div>
               <input
                 type="range"
@@ -312,65 +351,36 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
                 className="w-full accent-ink"
               />
             </div>
-          </div>
+          </Disclosure>
 
-          <div className="space-y-2">
-            <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">Mood</h3>
-            <MoodPicker
-              valence={mood.valence}
-              energy={mood.energy}
-              onChange={(next) => {
-                setMood(next);
-                setMoodDirty(true);
-              }}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="font-small-medium text-small-medium text-ink uppercase tracking-wider">
-                Journal Note (Encrypted)
-              </h3>
+          <Disclosure title="Mood and a note" summary={journalText.trim() ? 'Note written' : moodSummary}>
+            <div className="space-y-3 pt-2">
+              <MoodPicker
+                valence={mood.valence}
+                energy={mood.energy}
+                onChange={(next) => {
+                  setMood(next);
+                  setMoodDirty(true);
+                }}
+              />
+              <div className="space-y-1.5">
+                <span className="font-caption text-caption text-muted-text uppercase tracking-wider block">
+                  Note (encrypted)
+                </span>
+                <textarea
+                  rows={3}
+                  value={journalText}
+                  onChange={(e) => setJournalText(e.target.value)}
+                  placeholder="What got in the way today? Any wins?"
+                  className="w-full bg-surface border border-line rounded-xl p-3 font-small text-ink focus:outline-none focus:ring-1 focus:ring-ink"
+                />
+              </div>
             </div>
-            <textarea
-              rows={3}
-              value={journalText}
-              onChange={(e) => setJournalText(e.target.value)}
-              placeholder="What triggered friction today? Any wins or bottlenecks..."
-              className="w-full bg-surface border border-line rounded-xl p-3 font-small text-ink focus:outline-none focus:ring-1 focus:ring-ink"
-            />
-          </div>
+          </Disclosure>
 
           {crisisDetected && bannerSupport && <SupportCard support={bannerSupport} />}
         </div>
-
-        <div className="p-4 bg-surface border-t border-surface-container shrink-0 space-y-2">
-          <button
-            type="button"
-            disabled={isSubmitting}
-            onClick={handleConfirm}
-            className="w-full h-12 bg-ink text-ground-chalk rounded-xl font-body-strong text-body-strong flex items-center justify-center gap-2 active:bg-secondary transition-colors disabled:opacity-50"
-          >
-            <span>
-              {isSubmitting
-                ? 'Locking in...'
-                : sleepDirty || screenDirty || Object.keys(habitOverrides).length
-                  ? 'Confirm today (edits applied)'
-                  : 'Confirm today (defaults accepted)'}
-            </span>
-            <span className="material-symbols-outlined text-[18px]">check</span>
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full py-2 text-center font-caption text-caption text-muted-text hover:text-ink transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-          </>
-        )}
-      </div>
-    </div>
+      )}
+    </Sheet>
   );
 };

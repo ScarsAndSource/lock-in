@@ -6,7 +6,8 @@ import { CheckinView, Profile } from '../types';
 import { localTodayISO } from '../lib/dates';
 import { errorMessage } from '../lib/format';
 
-type Tab = 'today' | 'track' | 'review' | 'chat' | 'more';
+export type Tab = 'now' | 'companion' | 'mirror';
+export type DomainKey = 'habits' | 'sleep' | 'screen' | 'study' | 'urges' | 'pauses';
 
 interface AppContextType {
   activeTab: Tab;
@@ -17,6 +18,11 @@ interface AppContextType {
   setCheckinModalOpen: (open: boolean) => void;
   urgeQuickModalOpen: boolean;
   setUrgeQuickModalOpen: (open: boolean) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (open: boolean) => void;
+  domainSheet: DomainKey | null;
+  openDomain: (key: DomainKey) => void;
+  closeDomain: () => void;
   demoMode: boolean;
   toggleDemoMode: (val: boolean) => void;
   token: string | null;
@@ -34,10 +40,12 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('today');
+  const [activeTab, setActiveTab] = useState<Tab>('now');
   const [activeDate, setActiveDate] = useState<string>(localTodayISO());
   const [checkinModalOpen, setCheckinModalOpen] = useState(false);
   const [urgeQuickModalOpen, setUrgeQuickModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [domainSheet, setDomainSheet] = useState<DomainKey | null>(null);
   const [demoMode, setDemoModeState] = useState(isDemoMode());
   const [token, setTokenState] = useState<string | null>(getAuthToken());
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -49,6 +57,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const checkinSeq = useRef(0);
 
   const bumpData = useCallback(() => setDataEpoch((n) => n + 1), []);
+  const openDomain = useCallback((key: DomainKey) => setDomainSheet(key), []);
+  const closeDomain = useCallback(() => setDomainSheet(null), []);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -149,6 +159,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setCheckinModalOpen,
         urgeQuickModalOpen,
         setUrgeQuickModalOpen,
+        settingsOpen,
+        setSettingsOpen,
+        domainSheet,
+        openDomain,
+        closeDomain,
         demoMode,
         toggleDemoMode,
         token,

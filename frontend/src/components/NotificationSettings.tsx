@@ -71,12 +71,8 @@ export const NotificationSettings: React.FC = () => {
   const field = 'bg-surface border border-line rounded-lg px-2.5 py-1.5 font-small text-ink';
 
   return (
-    <section className="bg-surface rounded-xl p-4 border border-line shadow-sm space-y-4">
+    <section className="space-y-4">
       <div>
-        <span className="font-caption text-caption text-muted-text uppercase tracking-wider block">
-          Reminders & nudges
-        </span>
-        <h3 className="font-section text-section text-ink">Notifications</h3>
         <p className="font-caption text-caption text-muted-text leading-relaxed">
           Nudges back off instead of piling up, small things arrive as one daily digest, and quiet hours always win.
           On iPhone, add the app to your Home Screen first.

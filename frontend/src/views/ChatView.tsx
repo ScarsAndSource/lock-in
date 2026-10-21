@@ -6,6 +6,8 @@ import { SupportCard } from '../components/SupportCard';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
+const STARTERS = ['Why did I slip this week?', 'What is hurting my sleep?', 'Which habit is my weakest?'];
+
 export const ChatView: React.FC = () => {
   const { showToast, profile } = useApp();
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -51,11 +53,9 @@ export const ChatView: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, support]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || isSending) return;
-
-    const text = inputText.trim();
+  const send = async (raw: string) => {
+    const text = raw.trim();
+    if (!text || isSending) return;
     setInputText('');
     setIsSending(true);
 
@@ -83,6 +83,11 @@ export const ChatView: React.FC = () => {
     }
   };
 
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    void send(inputText);
+  };
+
   const startNewChat = () => {
     setActiveThreadId(null);
     setMessages([]);
@@ -91,16 +96,15 @@ export const ChatView: React.FC = () => {
 
   return (
     <div className="flex flex-col w-full h-[calc(100dvh-130px)] max-w-md mx-auto">
-      {/* Voice & Tone Banner & Thread Selector */}
-      <div className="p-3 bg-surface-container rounded-xl flex items-center justify-between mb-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-ink text-[18px]">psychology</span>
+      {(threads.length > 0 || messages.length > 0) && (
+        <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
           {threads.length > 1 ? (
             <select
               value={activeThreadId || ''}
-              onChange={(e) => setActiveThreadId(e.target.value)}
-              className="bg-surface border border-line rounded px-2 py-0.5 text-[11px] font-caption text-ink"
+              onChange={(e) => setActiveThreadId(e.target.value || null)}
+              className="min-w-0 flex-1 bg-surface border border-line rounded-lg px-2 h-9 text-[12px] font-caption text-ink"
             >
+              {activeThreadId === null && <option value="">New chat</option>}
               {threads.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.title}
@@ -108,59 +112,60 @@ export const ChatView: React.FC = () => {
               ))}
             </select>
           ) : (
-            <span className="font-caption text-caption text-ink font-semibold">
-              Data-Grounded Coaching (No Fluff)
-            </span>
+            <span />
           )}
+          <button
+            type="button"
+            onClick={startNewChat}
+            className="h-9 px-3 rounded-lg bg-surface-container text-ink font-caption text-caption font-semibold hover:bg-secondary-fixed shrink-0"
+          >
+            New chat
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={startNewChat}
-          className="font-caption text-caption px-2 py-0.5 rounded bg-surface hover:bg-surface-container-low text-ink font-medium"
-        >
-          + New Chat
-        </button>
-      </div>
+      )}
 
-      {/* Message history */}
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2">
         {messages.length === 0 && (
-          <div className="text-center py-10 space-y-2">
-            <span className="material-symbols-outlined text-[32px] text-muted-text">chat</span>
+          <div className="py-10 space-y-4 text-center">
             <p className="font-small text-small text-muted-text max-w-xs mx-auto">
-              Ask about behavioral friction: e.g. "Why do I keep skipping gym on Thursdays?" or "How does screen time affect my sleep?"
+              Ask about your own week. Answers come from your logs, not guesses.
             </p>
+            <div className="flex flex-col gap-2 items-center">
+              {STARTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  disabled={isSending}
+                  onClick={() => void send(s)}
+                  className="px-4 h-10 rounded-full bg-surface border border-line font-small text-small text-ink hover:bg-surface-container transition-colors disabled:opacity-50"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
         {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
-          >
+          <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div
-              className={`max-w-[85%] rounded-2xl p-3.5 space-y-2 text-small leading-relaxed shadow-xs ${
-                m.role === 'user'
-                  ? 'bg-ink text-ground-chalk rounded-br-xs'
-                  : 'bg-surface text-ink border border-line rounded-bl-xs'
+              className={`max-w-[85%] rounded-2xl p-3.5 space-y-2 text-small leading-relaxed ${
+                m.role === 'user' ? 'bg-ink text-ground-chalk rounded-br-md' : 'bg-surface text-ink border border-line rounded-bl-md'
               }`}
             >
               <p>{m.content}</p>
 
-              {/* Next step recommendation on coach messages */}
               {m.next_step && (
                 <div className="p-2.5 bg-surface-container-low rounded-lg border border-surface-container text-ink font-caption text-caption">
                   <span className="font-bold block uppercase tracking-wider text-[10px] text-muted-text mb-0.5">
-                    Recommended Action
+                    Next step
                   </span>
                   <span>{m.next_step}</span>
                 </div>
               )}
 
               {m.cited_days && m.cited_days.length > 0 && (
-                <div className="font-caption text-[11px] text-muted-text pt-1">
-                  Citing data from: {m.cited_days.join(', ')}
-                </div>
+                <div className="font-caption text-[11px] text-muted-text pt-1">Based on: {m.cited_days.join(', ')}</div>
               )}
             </div>
             <span className="font-caption text-[10px] text-muted-text px-1 mt-1">
@@ -174,23 +179,23 @@ export const ChatView: React.FC = () => {
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce" />
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce [animation-delay:0.2s]" />
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce [animation-delay:0.4s]" />
-            <span className="ml-1">Querying logs & Groq...</span>
+            <span className="ml-1">Thinking…</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input bar */}
       <form onSubmit={handleSend} className="pt-2 shrink-0 flex items-center gap-2">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Ask grounded in your data..."
+          placeholder="Ask about your week…"
           className="flex-1 h-12 bg-surface border border-line rounded-xl px-4 font-small text-ink focus:outline-none focus:ring-1 focus:ring-ink"
         />
         <button
           type="submit"
+          aria-label="Send"
           disabled={!inputText.trim() || isSending}
           className="w-12 h-12 rounded-xl bg-ink text-ground-chalk flex items-center justify-center disabled:opacity-40 transition-opacity"
         >

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import type { DomainKey } from '../context/AppContext';
 import { getConsistency } from '../api/stats';
 import { createHabit } from '../api/habits';
 import {
@@ -36,11 +37,15 @@ import {
 } from '../lib/format';
 import { addDaysISO } from '../lib/dates';
 
-type TrackDomain = 'habits' | 'sleep' | 'screen' | 'study' | 'urges' | 'pauses';
+type TrackDomain = DomainKey;
 
-export const TrackView: React.FC = () => {
+interface TrackViewProps {
+  initialDomain?: TrackDomain;
+}
+
+export const TrackView: React.FC<TrackViewProps> = ({ initialDomain = 'habits' }) => {
   const { showToast, setUrgeQuickModalOpen, activeDate, dataEpoch, demoMode, bumpData } = useApp();
-  const [selectedDomain, setSelectedDomain] = useState<TrackDomain>('habits');
+  const [selectedDomain, setSelectedDomain] = useState<TrackDomain>(initialDomain);
 
   // Domain states
   const [consistency, setConsistency] = useState<ConsistencyOut | null>(null);
@@ -55,6 +60,8 @@ export const TrackView: React.FC = () => {
   // Forms
   const [newHabitName, setNewHabitName] = useState('');
   const [newHabitCount, setNewHabitCount] = useState(5);
+  const [newFloor, setNewFloor] = useState('');
+  const [newStretch, setNewStretch] = useState('');
   const [bulkSubjectsText, setBulkSubjectsText] = useState('');
   const [sessionSubjectId, setSessionSubjectId] = useState('');
   const [sessionPlanned, setSessionPlanned] = useState(60);
@@ -103,9 +110,15 @@ export const TrackView: React.FC = () => {
     e.preventDefault();
     if (!newHabitName.trim()) return;
     try {
-      await createHabit(newHabitName.trim(), { type: 'n_per_week', count: newHabitCount });
+      await createHabit(
+        newHabitName.trim(),
+        { type: 'n_per_week', count: newHabitCount },
+        { floor_text: newFloor, stretch_text: newStretch }
+      );
       showToast('Habit registered');
       setNewHabitName('');
+      setNewFloor('');
+      setNewStretch('');
       bumpData();
     } catch (err: unknown) {
       showToast(errorMessage(err, 'Error creating habit'));
@@ -296,6 +309,22 @@ export const TrackView: React.FC = () => {
                 className="w-32 accent-ink"
               />
             </div>
+            <input
+              type="text"
+              maxLength={120}
+              placeholder="Floor: the smallest version that still counts (optional)"
+              value={newFloor}
+              onChange={(e) => setNewFloor(e.target.value)}
+              className="w-full bg-surface border border-line rounded-lg px-3 py-2 font-small text-ink"
+            />
+            <input
+              type="text"
+              maxLength={120}
+              placeholder="Stretch: the version for a great day (optional)"
+              value={newStretch}
+              onChange={(e) => setNewStretch(e.target.value)}
+              className="w-full bg-surface border border-line rounded-lg px-3 py-2 font-small text-ink"
+            />
             <button
               type="submit"
               className="w-full h-10 bg-ink text-ground-chalk rounded-lg font-caption text-caption font-semibold hover:bg-secondary transition-colors"

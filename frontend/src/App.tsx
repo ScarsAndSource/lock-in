@@ -1,45 +1,35 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { CheckinModal } from './components/CheckinModal';
 import { UrgeQuickModal } from './components/UrgeQuickModal';
+import { UrgeFab } from './components/UrgeFab';
 import { Toast } from './components/Toast';
 import { LoginScreen } from './components/LoginScreen';
-import { TodayView } from './views/TodayView';
-import { TrackView } from './views/TrackView';
-import { ReviewView } from './views/ReviewView';
-import { ChatView } from './views/ChatView';
-import { MoreView } from './views/MoreView';
+
+// Each tab and sheet is its own chunk: a screen's code only downloads when it is first opened.
+const NowView = lazy(() => import('./views/NowView').then((m) => ({ default: m.NowView })));
+const ChatView = lazy(() => import('./views/ChatView').then((m) => ({ default: m.ChatView })));
+const MirrorView = lazy(() => import('./views/MirrorView').then((m) => ({ default: m.MirrorView })));
+const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })));
+const DomainSheet = lazy(() => import('./components/DomainSheet').then((m) => ({ default: m.DomainSheet })));
+
+const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror' } as const;
 
 export const AppContent: React.FC = () => {
   const {
     activeTab,
-    setActiveTab,
     checkinModalOpen,
     setCheckinModalOpen,
     urgeQuickModalOpen,
     setUrgeQuickModalOpen,
+    settingsOpen,
+    setSettingsOpen,
+    domainSheet,
     demoMode,
     token,
   } = useApp();
-
-  const getTitle = () => {
-    switch (activeTab) {
-      case 'today':
-        return 'Today';
-      case 'track':
-        return 'Track';
-      case 'review':
-        return 'Review';
-      case 'chat':
-        return 'Chat';
-      case 'more':
-        return 'More';
-      default:
-        return 'Lock’in';
-    }
-  };
 
   // Live mode with no session: login first. Demo mode is an explicit opt-in from the login screen.
   if (!demoMode && !token) {
@@ -48,32 +38,27 @@ export const AppContent: React.FC = () => {
 
   return (
     <div className="bg-ground-chalk font-body-default text-ink flex flex-col min-h-screen">
-      {/* Top Header */}
-      <Header title={getTitle()} onProfileClick={() => setActiveTab('more')} />
+      <Header title={TITLES[activeTab]} onProfileClick={() => setSettingsOpen(true)} />
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col w-full pt-16 pb-20 px-margin bg-ground-chalk">
-        {activeTab === 'today' && <TodayView />}
-        {activeTab === 'track' && <TrackView />}
-        {activeTab === 'review' && <ReviewView />}
-        {activeTab === 'chat' && <ChatView />}
-        {activeTab === 'more' && <MoreView />}
+        <Suspense fallback={<p className="py-10 text-center font-small text-muted-text">Loading…</p>}>
+          {activeTab === 'now' && <NowView />}
+          {activeTab === 'companion' && <ChatView />}
+          {activeTab === 'mirror' && <MirrorView />}
+        </Suspense>
       </main>
 
-      {/* Fixed Bottom Navigation */}
+      {activeTab !== 'companion' && <UrgeFab />}
       <BottomNav />
 
-      {/* Checkin and Urge Quick Modals */}
-      <CheckinModal
-        isOpen={checkinModalOpen}
-        onClose={() => setCheckinModalOpen(false)}
-      />
-      <UrgeQuickModal
-        isOpen={urgeQuickModalOpen}
-        onClose={() => setUrgeQuickModalOpen(false)}
-      />
+      <CheckinModal isOpen={checkinModalOpen} onClose={() => setCheckinModalOpen(false)} />
+      <UrgeQuickModal isOpen={urgeQuickModalOpen} onClose={() => setUrgeQuickModalOpen(false)} />
 
-      {/* Toast Notification */}
+      <Suspense fallback={null}>
+        {domainSheet && <DomainSheet />}
+        {settingsOpen && <SettingsSheet />}
+      </Suspense>
+
       <Toast />
     </div>
   );
