@@ -43,7 +43,7 @@ async def get_chain(
             study=d.study, urges=d.urges, habit_ratio=d.habit_ratio,
             sleep_minutes=d.sleep_minutes, screen_minutes=d.screen_minutes,
             sleep_defaulted=d.sleep_defaulted, screen_time_defaulted=d.screen_time_defaulted,
-            habits_defaulted=d.habits_defaulted,
+            habits_defaulted=d.habits_defaulted, mood=d.mood, tasks=d.tasks, mood_valence=d.mood_valence,
         ) for d in chain
     ])
 

@@ -9,6 +9,7 @@ the same anti-nag rules as nudge_policy:
   risk      30 min before an hour their urges cluster: their OWN if-then plan, neutral on the lock screen
   winddown  ~40 min before their usual bedtime (their own sleep plan, else a plain heads-up)
   study     only when this week's study goal is falling behind and nothing was studied today
+  insight   ONE neutral push the day a new pattern shows up in your data (the lock screen never names it)
 
 Rules that hold for every kind (the same philosophy as nudge_policy, SPEC sections 6 and 8):
   * Quiet hours win. The one exception is the person's OWN if-then plan, and only if they turned
@@ -31,7 +32,7 @@ from app.services.nudge_policy import PushMessage, in_quiet_hours
 from app.services.risk_windows import RiskWindow
 from app.services.task_time import at_local
 
-COMPANION_KINDS = ("checkin", "habit", "risk", "winddown", "study")
+COMPANION_KINDS = ("checkin", "habit", "risk", "winddown", "study", "insight")
 PLAN_CUE_KINDS = ("risk", "winddown", "study", "habit")   # kinds that can carry the person's own if-then plan
 RESOLVABLE_KINDS = ("checkin", "habit")                   # "acted" also when that day's check-in was confirmed
 
@@ -43,8 +44,8 @@ LONG_MUTE_AFTER_IGNORED, LONG_MUTE_DAYS = 6, 7
 RISK_LEAD, RISK_GRACE = timedelta(minutes=30), timedelta(minutes=15)
 WIND_LEAD, WIND_GRACE = timedelta(minutes=45), timedelta(minutes=-20)   # fires bed-45m .. bed-20m
 STUDY_BEHIND_RATIO = 0.6
-PRIORITY = {"risk": 90, "winddown": 80, "checkin": 65, "habit": 60, "study": 50}
-TTL_MINUTES = {"risk": 120, "winddown": 90, "checkin": 6 * 60, "habit": 4 * 60, "study": 4 * 60}
+PRIORITY = {"risk": 90, "winddown": 80, "checkin": 65, "habit": 60, "insight": 55, "study": 50}
+TTL_MINUTES = {"risk": 120, "winddown": 90, "checkin": 6 * 60, "habit": 4 * 60, "study": 4 * 60, "insight": 12 * 60}
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +86,13 @@ class CompanionContext:
     study_weekly_target: int | None = None
     study_week_minutes: int = 0
     study_today_minutes: int = 0
+    fresh_insights: int = 0        # new insights generated TODAY by the daily pulse and not yet pushed
 
 
 # ---------------------------------------------------------------- small pure helpers
 def clip(text: str, limit: int) -> str:
     one = " ".join(text.split())
-    return one if len(one) <= limit else one[: limit - 1].rstrip() + "…"
+    return one if len(one) <= limit else one[: limit - 1].rstrip() + "â€¦"
 
 
 def occurrence_near(now: datetime, tz: ZoneInfo, at: time, lead: timedelta, grace: timedelta) -> date | None:
@@ -240,7 +242,16 @@ def _study(ctx: CompanionContext, local: datetime) -> PushMessage | None:
     )
 
 
-_BUILDERS = (_risk, _winddown, _checkin, _habit, _study)
+def _insight(ctx: CompanionContext, local: datetime) -> PushMessage | None:
+    if ctx.fresh_insights < 1:
+        return None
+    return _msg(
+        "insight", f"insight:{local.date().isoformat()}", "A pattern showed up",
+        "Something in your recent data lines up. Tap to see it.", (("view", "Show me"),), {}, "/?a=insight",
+    )
+
+
+_BUILDERS = (_risk, _winddown, _checkin, _habit, _insight, _study)
 
 
 def plan_companion(ctx: CompanionContext) -> list[PushMessage]:

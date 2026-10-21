@@ -44,11 +44,12 @@ class CompanionPlanner:
     def __init__(
         self, ledger: CompanionRepository, habits: HabitRepository, checkins: CheckinRepository,
         urges: UrgeRepository, sleep: SleepRepository, goals: GoalRepository, study: StudyService,
-        intentions: IntentionsService, stats: StatsService, pauses,
+        intentions: IntentionsService, stats: StatsService, pauses, insights=None,
     ):
         self._ledger, self._habits, self._checkins, self._urges = ledger, habits, checkins, urges
         self._sleep, self._goals, self._study = sleep, goals, study
         self._intentions, self._stats, self._pauses = intentions, stats, pauses
+        self._insights = insights
 
     async def plan(
         self, user_id, now: datetime, prefs: NotificationPrefs, tz: ZoneInfo, paused: bool,
@@ -110,6 +111,10 @@ class CompanionPlanner:
             ctx.bedtime = cp.median_bedtime([l.time_to_bed for l in logs if not l.is_default and l.time_to_bed is not None])
             if ctx.bedtime is not None and "sleep" in domains:
                 ctx.sleep_cues = _cues(await self._intentions.due(user_id, "sleep", today))
+
+        # ---- a new insight from today's pulse (the pulse row in the ledger means the day's data is in)
+        if self._insights is not None and f"pulse:{iso}" in sent and f"insight:{iso}" not in sent:
+            ctx.fresh_insights = sum(1 for i in await self._insights.list_all(user_id, 10) if i.generated_on == today)
 
         return cp.plan_companion(ctx)
 

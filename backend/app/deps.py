@@ -10,6 +10,8 @@ from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.companion_repository import SqlAlchemyCompanionRepository
+from app.repositories.ingest_repository import SqlAlchemyIngestTokenRepository
+from app.services.ingest_service import IngestService
 from app.repositories.goal_repository import SqlAlchemyGoalRepository, SqlAlchemyIntentionRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
@@ -30,6 +32,7 @@ from app.services import push_actions
 from app.services.account_service import AccountService
 from app.services.actions_service import ActionsService
 from app.services.chat_agent import AgentChatService, AgentExecutor
+from app.services.media_service import MediaService
 from app.services.chat_service import ChatService
 from app.services.chat_threads_service import ChatThreadsService
 from app.services.checkins_service import CheckinsService
@@ -187,6 +190,10 @@ def get_profile_service(
     return ProfileService(repo, clock)
 
 
+def get_task_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyTaskRepository:
+    return SqlAlchemyTaskRepository(session)
+
+
 def get_stats_service(
     habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
     sleep_repo: SqlAlchemySleepRepository = Depends(get_sleep_repository),
@@ -195,8 +202,12 @@ def get_stats_service(
     study_repo: SqlAlchemyStudySessionRepository = Depends(get_study_session_repository),
     urge_repo: SqlAlchemyUrgeRepository = Depends(get_urge_repository),
     pause_repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    mood_repo: SqlAlchemyMoodRepository = Depends(get_mood_repository),
+    task_repo: SqlAlchemyTaskRepository = Depends(get_task_repository),
 ) -> StatsService:
-    return StatsService(habit_repo, sleep_repo, screen_repo, profiles, study_repo, urge_repo, pause_repo)
+    return StatsService(
+        habit_repo, sleep_repo, screen_repo, profiles, study_repo, urge_repo, pause_repo, mood_repo, task_repo,
+    )
 
 
 def get_missions_service(
@@ -425,3 +436,28 @@ def get_actions_service(
     return ActionsService(
         ledger=ledger, tasks=tasks, checkins=checkins, habits=habits, profiles=profiles, secret=secret, clock=clock,
     )
+
+def get_media_service(
+    llm: LLMClient = Depends(get_llm_client),
+    habits: HabitsService = Depends(get_habits_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> MediaService:
+    """Voice + screenshot calls are metered under the "media" feature of the same per-user daily cap."""
+    return MediaService(scoped(llm, "media"), habits, profiles, clock)
+
+
+def get_ingest_token_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyIngestTokenRepository:
+    return SqlAlchemyIngestTokenRepository(session)
+
+
+def get_ingest_service(
+    tokens: SqlAlchemyIngestTokenRepository = Depends(get_ingest_token_repository),
+    sleep: SleepService = Depends(get_sleep_service),
+    sleep_repo: SqlAlchemySleepRepository = Depends(get_sleep_repository),
+    screen: ScreenTimeService = Depends(get_screen_time_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    secret: bytes = Depends(get_action_secret),
+    clock: Clock = Depends(get_clock),
+) -> IngestService:
+    return IngestService(tokens, sleep, sleep_repo, screen, profiles, secret, clock)

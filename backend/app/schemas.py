@@ -303,6 +303,9 @@ class ChainDayOut(BaseModel):
     sleep_defaulted: bool
     screen_time_defaulted: bool
     habits_defaulted: bool = False
+    mood: str = "none"
+    tasks: str = "none"
+    mood_valence: int | None = None
 
 
 class ChainOut(BaseModel):

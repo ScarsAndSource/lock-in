@@ -28,10 +28,17 @@ from app.security import FieldEncryptor
 from app.services import push_actions
 from app.services.actions_service import ActionsService
 from app.services.checkins_service import CheckinsService
+from app.services.daily_pulse import DailyPulse
 from app.services.companion_service import CompanionPlanner
+from app.repositories.ingest_repository import SqlAlchemyIngestTokenRepository
 from app.services.habits_service import HabitsService
+from app.services.ingest_service import IngestService
+from app.services.screen_time_service import ScreenTimeService
+from app.services.sleep_service import SleepService
+from app.repositories.insight_repository import SqlAlchemyInsightRepository
+from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
-from app.services.llm import LLMUnavailableError
+from app.services.llm import LLMClient, LLMUnavailableError, scoped
 from app.services.notifications_service import NotificationsService
 from app.services.profile_service import ProfileService
 from app.services.push import PushSender
@@ -48,7 +55,10 @@ class _NoLLM:
         raise LLMUnavailableError("No model in this context.")
 
 
-def build_stack(session: AsyncSession, settings: Settings, clock: Clock, sender: PushSender | None = None) -> SimpleNamespace:
+def build_stack(
+    session: AsyncSession, settings: Settings, clock: Clock, sender: PushSender | None = None,
+    llm: LLMClient | None = None,
+) -> SimpleNamespace:
     habit_repo, checkin_repo = SqlAlchemyHabitRepository(session), SqlAlchemyCheckinRepository(session)
     sleep_repo, screen_repo = SqlAlchemySleepRepository(session), SqlAlchemyScreenTimeRepository(session)
     pause_repo, urge_repo = SqlAlchemyPauseRepository(session), SqlAlchemyUrgeRepository(session)
@@ -59,7 +69,10 @@ def build_stack(session: AsyncSession, settings: Settings, clock: Clock, sender:
     profiles = ProfileService(SqlAlchemyProfileRepository(session), clock)
     secret = push_actions.derive_secret(settings.push_action_secret, settings.field_encryption_key)
 
-    stats = StatsService(habit_repo, sleep_repo, screen_repo, profiles, session_repo, urge_repo, pause_repo)
+    mood_repo = SqlAlchemyMoodRepository(session)
+    stats = StatsService(
+        habit_repo, sleep_repo, screen_repo, profiles, session_repo, urge_repo, pause_repo, mood_repo, task_repo,
+    )
     study = StudyService(subject_repo, session_repo, clock)
     intentions = IntentionsService(
         SqlAlchemyIntentionRepository(session), habit_repo, subject_repo, stats, profiles, clock, pauses=pause_repo,
@@ -67,12 +80,21 @@ def build_stack(session: AsyncSession, settings: Settings, clock: Clock, sender:
     tasks = TasksService(task_repo, notif_repo, profiles, _NoLLM(), clock)
     checkins = CheckinsService(
         habit_repo, checkin_repo, FieldEncryptor(settings.field_encryption_key, settings.old_encryption_keys),
-        sleep_repo, screen_repo, clock, goals=goal_repo, pauses=pause_repo, mood_repo=SqlAlchemyMoodRepository(session),
+        sleep_repo, screen_repo, clock, goals=goal_repo, pauses=pause_repo, mood_repo=mood_repo,
     )
+    insight_repo = SqlAlchemyInsightRepository(session)
+    # With no model the pulse still works: insights are stored with the deterministic statement (narrated=False).
+    insights = InsightsService(insight_repo, stats, clock, llm=scoped(llm, "insight") if llm is not None else None)
     planner = CompanionPlanner(
         ledger, habit_repo, checkin_repo, urge_repo, sleep_repo, goal_repo, study, intentions, stats, pause_repo,
+        insights=insight_repo,
     )
-    ns = SimpleNamespace(planner=planner, ledger=ledger, profiles=profiles)
+    ns = SimpleNamespace(planner=planner, ledger=ledger, profiles=profiles, insights=insights)
+    ns.pulse = DailyPulse(ledger, checkin_repo, insights)
+    ns.ingest = IngestService(
+        SqlAlchemyIngestTokenRepository(session), SleepService(sleep_repo, clock), sleep_repo,
+        ScreenTimeService(screen_repo, clock), profiles, secret, clock,
+    )
     ns.actions = ActionsService(
         ledger=ledger, tasks=tasks, checkins=checkins, habits=HabitsService(habit_repo, clock), profiles=profiles,
         secret=secret, clock=clock,

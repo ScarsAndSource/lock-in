@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # Empty secret => derived from FIELD_ENCRYPTION_KEY (stable across restarts; rotate by setting this explicitly).
     push_action_secret: str = ""
     public_api_url: str = ""      # origin the service worker should POST actions to; empty => same origin as the app
+    rate_limit_ingest_per_minute: int = Field(default=20, ge=1)        # per ingest token
     rate_limit_push_action_per_minute: int = Field(default=30, ge=1)   # per client IP: the action endpoint has no session
     # A subscription endpoint is a URL OUR SERVER will POST to, so it must be a real push service (SSRF guard).
     push_allowed_host_suffixes: list[str] = Field(

@@ -107,6 +107,8 @@ class DailyCheckin:
 class ScreenTimeSource(str, Enum):
     MANUAL = "manual"
     EXTENSION = "extension"
+    SCREENSHOT = "screenshot"      # read off a Screen Time screenshot (migration 015); the person confirmed it
+    AUTOMATION = "automation"      # pushed by an OS automation / Shortcut through an ingest token (migration 017)
 
 
 @dataclass(slots=True)
@@ -423,6 +425,33 @@ class PushSubscription:
     created_at: datetime
     user_agent: str | None = None
     fail_count: int = 0
+
+
+@dataclass(slots=True)
+class IngestToken:
+    """A device automation's credential record. The token string itself is never stored (see ingest_service)."""
+    id: UUID
+    user_id: UUID
+    label: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+@dataclass(slots=True)
+class CompanionPush:
+    """
+    One actionable push that was sent. `key` makes a moment unique (the same key can never be sent twice),
+    `id` is the single-use handle inside a signed action token. Holds NO free text.
+    """
+    id: UUID
+    user_id: UUID
+    kind: str            # task | checkin | habit | risk | winddown | study
+    key: str
+    local_date: date
+    sent_at: datetime
+    acted_at: datetime | None = None
+    action: str | None = None
 
 
 @dataclass(slots=True)

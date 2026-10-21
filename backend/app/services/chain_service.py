@@ -9,6 +9,9 @@ Sleep: worst of duration (>=7h good, >=6h ok) and quality (>=4 good, 3 ok).
 Screen: vs YOUR median once you have 5+ real logs (<=median good, <=1.25x ok);
 before that, absolute fallback (<=2h good, <=4h ok).
 Auto-filled sleep/screen rows are flagged so patterns can ignore them.
+Mood: the 1-5 "how it felt" tap (>=4 good, 3 ok, <=2 bad). Typed by the person, so never "defaulted".
+Tasks: of the tasks that were DUE that day, how many were done by the end of it. A task still open on a day that has
+not finished is not a miss yet; repeating tasks and dropped tasks are not counted (they have no single due day).
 """
 from __future__ import annotations
 
@@ -17,7 +20,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from uuid import UUID
 
-from app.domain import HabitDefinition, HabitLog, ScreenTimeLog, SleepLog
+from zoneinfo import ZoneInfo
+
+from app.domain import HabitDefinition, HabitLog, ScreenTimeLog, SleepLog, Task
 from app.services.schedule import check_scheduled, credit
 
 GOOD, OK, BAD, NONE = "good", "ok", "bad", "none"
@@ -40,6 +45,40 @@ class ChainDay:
     study: str = NONE
     urges: str = NONE
     habits_defaulted: bool = False
+    mood: str = NONE
+    tasks: str = NONE
+    mood_valence: int | None = None
+    tasks_due: int = 0
+    tasks_done: int = 0
+
+
+def mood_state(valence: int | None) -> str:
+    if valence is None:
+        return NONE
+    return GOOD if valence >= 4 else OK if valence == 3 else BAD
+
+
+def tasks_state(done: int, due: int) -> str:
+    if due <= 0:
+        return NONE
+    ratio = done / due
+    return GOOD if ratio >= 1 else OK if ratio >= 0.5 else BAD
+
+
+def task_outcomes_by_day(tasks: list[Task], tz: ZoneInfo, today: date) -> dict[date, tuple[int, int]]:
+    """{day: (done by end of that day, due that day)} from one-off tasks that had a due day."""
+    out: dict[date, list[int]] = {}
+    for t in tasks:
+        if t.due_at is None or t.repeat_days or t.status == "dropped":
+            continue
+        due_day = t.due_at.astimezone(tz).date()
+        done = t.status == "done" and t.completed_at is not None and t.completed_at.astimezone(tz).date() <= due_day
+        if not done and due_day >= today:
+            continue                                  # that day isn't over: not a miss yet
+        row = out.setdefault(due_day, [0, 0])
+        row[1] += 1
+        row[0] += 1 if done else 0
+    return {d: (v[0], v[1]) for d, v in out.items()}
 
 
 def sleep_state(log: SleepLog | None) -> str:
@@ -125,6 +164,8 @@ def build_chain(
     end: date,
     study_by_day: dict[date, int] | None = None,
     urge_by_day: dict[date, list[str]] | None = None,
+    mood_by_day: dict[date, int] | None = None,
+    task_by_day: dict[date, tuple[int, int]] | None = None,
 ) -> list[ChainDay]:
     by_habit: dict[UUID, dict[date, HabitLog]] = {}
     for log in habit_logs:
@@ -140,6 +181,8 @@ def build_chain(
         sleep_log, screen_log = sleep_by.get(d), screen_by.get(d)
         study_mins = (study_by_day or {}).get(d, 0)
         urge_outs = (urge_by_day or {}).get(d, [])
+        valence = (mood_by_day or {}).get(d)
+        t_done, t_due = (task_by_day or {}).get(d, (0, 0))
         days.append(ChainDay(
             day=d, habits=habits_state, sleep=sleep_state(sleep_log),
             screen_time=screen_state(screen_log.total_minutes if screen_log else None, baseline),
@@ -151,6 +194,8 @@ def build_chain(
             sleep_defaulted=bool(sleep_log and sleep_log.is_default),
             screen_time_defaulted=bool(screen_log and screen_log.is_default),
             habits_defaulted=defaulted,
+            mood=mood_state(valence), tasks=tasks_state(t_done, t_due),
+            mood_valence=valence, tasks_due=t_due, tasks_done=t_done,
         ))
         d += timedelta(days=1)
     return days

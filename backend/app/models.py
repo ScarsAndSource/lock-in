@@ -115,7 +115,9 @@ class ScreenTimeLogORM(Base):
     __tablename__ = "screen_time_logs"
     __table_args__ = (
         UniqueConstraint("user_id", "log_date", name="screen_time_logs_user_id_log_date_key"),
-        CheckConstraint("source in ('manual', 'extension')", name="screen_time_logs_source_check"),
+        CheckConstraint(
+            "source in ('manual', 'extension', 'screenshot', 'automation')", name="screen_time_logs_source_check"
+        ),
         CheckConstraint("total_minutes >= 0", name="screen_time_logs_minutes_check"),
     )
 
@@ -369,6 +371,17 @@ class CompanionPushORM(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     acted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class IngestTokenORM(Base):
+    __tablename__ = "ingest_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PushSubscriptionORM(Base):

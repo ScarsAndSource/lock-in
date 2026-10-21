@@ -27,7 +27,10 @@ from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, apply_rls_context
 from app.models import NotificationPrefsORM, PushSubscriptionORM
+from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.services.companion_wiring import build_stack
+from app.services.llm import BudgetedLLM, GroqClient, LLMClient, LLMError
+from app.services.task_time import zone
 from app.services.push import PushSender, WebPushSender
 
 logger = logging.getLogger("lockin.jobs.nudges")
@@ -49,17 +52,35 @@ async def candidate_user_ids(clock: Clock = utc_now, limit: int = MAX_USERS_PER_
     return sorted(r[0] for r in rows)
 
 
-async def _run_user(user_id: UUID, sender: PushSender, settings: Settings, clock: Clock) -> int:
+async def _run_user(
+    user_id: UUID, sender: PushSender, settings: Settings, clock: Clock, inner_llm: LLMClient | None = None,
+) -> int:
     async with AsyncSessionLocal() as session:
         async with session.begin():  # one transaction per user: a failure rolls back only that user
             if settings.rls_enforced:
                 await apply_rls_context(session, user_id)
-            service = build_stack(session, settings, clock, sender).notifications
-            return (await service.dispatch(user_id)).sent
+            llm = BudgetedLLM(
+                inner_llm, SqlAlchemyLlmUsageRepository(AsyncSessionLocal, rls_enforced=settings.rls_enforced),
+                user_id, settings.llm_daily_call_cap, "insight", clock,
+            ) if inner_llm is not None else None
+            stack = build_stack(session, settings, clock, sender, llm)
+            tz = zone((await stack.profiles.get(user_id)).timezone)
+            try:   # same-day insights: a failure here must never cost the person their reminders
+                await stack.pulse.run(user_id, clock(), tz)
+            except LLMError:
+                logger.warning("pulse skipped for user %s: model unavailable", user_id)
+            return (await stack.notifications.dispatch(user_id)).sent
 
 
-async def run_once(sender: PushSender | None = None, clock: Clock = utc_now) -> dict[str, int]:
+async def run_once(
+    sender: PushSender | None = None, clock: Clock = utc_now, llm: LLMClient | None = None,
+) -> dict[str, int]:
     settings = get_settings()
+    if llm is None and settings.groq_api_key:
+        llm = GroqClient(
+            settings.groq_api_key, settings.groq_model, settings.groq_timeout_seconds, settings.groq_base_url,
+            max_retries=settings.groq_max_retries,
+        )
     sender = sender or WebPushSender(settings.vapid_private_key, settings.vapid_subject)
     counts = {"users": 0, "sent": 0, "errors": 0}
     if not sender.configured:
@@ -69,7 +90,7 @@ async def run_once(sender: PushSender | None = None, clock: Clock = utc_now) -> 
     for user_id in await candidate_user_ids(clock):
         counts["users"] += 1
         try:
-            counts["sent"] += await asyncio.wait_for(_run_user(user_id, sender, settings, clock), PER_USER_TIMEOUT_SECONDS)
+            counts["sent"] += await asyncio.wait_for(_run_user(user_id, sender, settings, clock, llm), PER_USER_TIMEOUT_SECONDS)
         except Exception:  # noqa: BLE001 -- includes timeouts; one user never blocks the rest
             counts["errors"] += 1
             logger.exception("nudge dispatch failed for user %s", user_id)

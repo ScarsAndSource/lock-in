@@ -159,5 +159,14 @@ def fallback_next_step(pattern_key: str) -> str:
         "screen_time->study": "Phone out of the room for the first hour of tomorrow's study block.",
         "sleep->urges": "After a short night, plan your evening before the urge shows up.",
         "screen_time->urges": "Heavy screen day: set a hard stop time tonight and decide what you'll do instead.",
+        "sleep->mood": "After a short night, plan one easy win for the morning and go easy on yourself.",
+        "screen_time->mood": "Heavy screen day: a 20-minute walk before bed tends to be the cheapest reset.",
+        "mood->habits": "On a low day, set tomorrow's floor version tonight so it is already decided.",
+        "mood->screen_time": "After a low day, put the phone charging across the room before you start scrolling.",
+        "mood->urges": "On a low day, write your if-then plan down before the evening starts.",
+        "sleep->tasks": "After a bad night, move the hardest task to your best hour and drop the rest.",
+        "screen_time->tasks": "Heavy screen day: pick ONE due task and do 10 minutes of it before opening the phone again.",
+        "tasks->habits": "When tasks slip, keep the floor version of your habit so the day still counts.",
+        "tasks->mood": "Missed tasks weigh on the day: re-plan them tonight so tomorrow starts clean.",
     }
     return _STEPS.get(pattern_key, "Log every day next week, even rough numbers.")

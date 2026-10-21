@@ -26,6 +26,17 @@ _PAIRS = (
     ("screen_time", "study", 1, "A heavy screen day", "study time dropped the next day"),
     ("sleep", "urges", 0, "Bad sleep", "an urge relapsed the same day"),
     ("screen_time", "urges", 1, "A heavy screen day", "an urge relapsed the next day"),
+    # mood (the 1-5 "how it felt" tap) both ways: what drags it down, and what it drags down
+    ("sleep", "mood", 0, "Bad sleep", "a low mood the same day"),
+    ("screen_time", "mood", 1, "A heavy screen day", "a low mood the next day"),
+    ("mood", "habits", 1, "A low-mood day", "habits slipped the next day"),
+    ("mood", "screen_time", 1, "A low-mood day", "heavy screen time the next day"),
+    ("mood", "urges", 0, "A low-mood day", "an urge relapsed the same day"),
+    # tasks: days where what was due did not get done
+    ("sleep", "tasks", 0, "Bad sleep", "tasks due that day slipped"),
+    ("screen_time", "tasks", 0, "A heavy screen day", "tasks due that day slipped"),
+    ("tasks", "habits", 1, "A day with missed tasks", "habits slipped the next day"),
+    ("tasks", "mood", 0, "A day with missed tasks", "a low mood the same day"),
 )
 
 

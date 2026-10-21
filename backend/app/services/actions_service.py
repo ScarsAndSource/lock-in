@@ -30,14 +30,14 @@ from app.services.profile_service import ProfileService
 from app.services.tasks_service import TasksService
 
 SNOOZE_MINUTES = 60
-NOOP_ACTIONS = {"ok": "Nice. Go for it.", "later": "Okay, not now.", "open": "Opened."}
+NOOP_ACTIONS = {"ok": "Nice. Go for it.", "later": "Okay, not now.", "open": "Opened.", "view": "Opened."}
 
 # kind -> actions that are real writes (anything in NOOP_ACTIONS is accepted for every kind)
 KIND_ACTIONS: dict[str, tuple[str, ...]] = {
     "task": ("done", "snooze"),
     "checkin": ("lock", "rough"),
     "habit": ("done", "floor", "skip"),
-    "risk": (), "winddown": (), "study": (),
+    "risk": (), "winddown": (), "study": (), "insight": (),
 }
 
 

@@ -14,7 +14,10 @@ from app.repositories.urge_repository import UrgeRepository
 from app.services.bounce_back import (
     LOOKBACK_DAYS, BounceRate, BounceState, classify_range, compute_bounce_rate, compute_bounce_state,
 )
-from app.services.chain_service import NONE, ChainDay, build_chain, study_states_by_day, urge_states_by_day
+from app.services.chain_service import (
+    NONE, ChainDay, build_chain, study_states_by_day, task_outcomes_by_day, urge_states_by_day,
+)
+from app.services.task_time import zone
 from app.services.consistency_service import HabitConsistency, compute_habit_consistency, overall_consistency
 from app.services.pattern_service import Pattern, find_patterns
 from app.services.pause_days import split_pause_days
@@ -45,6 +48,8 @@ class StatsService:
         study_repo: StudySessionRepository | None = None,
         urge_repo: UrgeRepository | None = None,
         pause_repo: PauseRepository | None = None,
+        mood_repo=None,
+        task_repo=None,
     ):
         self._habits = habit_repo
         self._sleep = sleep_repo
@@ -53,6 +58,8 @@ class StatsService:
         self._study = study_repo
         self._urges = urge_repo
         self._pauses = pause_repo
+        self._mood = mood_repo
+        self._tasks = task_repo
 
     async def _resolve_end(self, user_id: UUID, end_date: date | None) -> date:
         return end_date or await self._profiles.today(user_id)
@@ -126,6 +133,15 @@ class StatsService:
             urge_states_by_day(await self._urges.list_in_range(user_id, start, end))
             if self._urges else None
         )
+        mood_by_day = (
+            {m.log_date: m.valence for m in await self._mood.list_logs_in_range(user_id, start, end)}
+            if self._mood else None
+        )
+        task_by_day = None
+        if self._tasks:
+            today = await self._profiles.today(user_id)
+            tz = zone((await self._profiles.get(user_id)).timezone)
+            task_by_day = task_outcomes_by_day(await self._tasks.list(user_id, None, 500), tz, today)
         rows = build_chain(
             habits,
             habit_logs,
@@ -135,6 +151,8 @@ class StatsService:
             end,
             study_by_day=study_states,
             urge_by_day=urge_states,
+            mood_by_day=mood_by_day,
+            task_by_day=task_by_day,
         )
         global_days, by_habit = await self._pause_sets(user_id, start, end)
         real_logs = {(l.habit_id, l.log_date) for l in habit_logs if not l.is_default}

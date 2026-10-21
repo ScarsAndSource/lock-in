@@ -425,7 +425,7 @@ class AgentChatService:
 
         cards = [await self._exec.apply(user_id, p, confirmed=False) for p in planned]
         lines = [
-            ("✓ " if c.status == "applied" else "? " if c.status == "pending" else "✗ ")
+            ("âœ“ " if c.status == "applied" else "? " if c.status == "pending" else "âœ— ")
             + c.summary + (" (needs your OK)" if c.status == "pending" else f" ({c.reason})" if c.status == "failed" else "")
             for c in cards
         ]

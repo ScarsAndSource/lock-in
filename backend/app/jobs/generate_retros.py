@@ -28,6 +28,8 @@ from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
 from app.repositories.llm_usage_repository import SqlAlchemyLlmUsageRepository
 from app.repositories.mission_repository import SqlAlchemyMissionRepository
+from app.repositories.mood_repository import SqlAlchemyMoodRepository
+from app.repositories.task_repository import SqlAlchemyTaskRepository
 from app.repositories.pause_repository import SqlAlchemyPauseRepository
 from app.repositories.profile_repository import SqlAlchemyProfileRepository
 from app.repositories.retro_repository import SqlAlchemyRetroRepository
@@ -80,6 +82,8 @@ def build_retro_service(session, llm: LLMClient, settings: Settings, clock: Cloc
         study_repo,
         urge_repo,
         SqlAlchemyPauseRepository(session),
+        SqlAlchemyMoodRepository(session),
+        SqlAlchemyTaskRepository(session),
     )
     study = StudyService(SqlAlchemySubjectRepository(session), study_repo, clock)
     encryptor = FieldEncryptor(settings.field_encryption_key, settings.old_encryption_keys)
