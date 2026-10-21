@@ -77,7 +77,12 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-// ---------------------------------------------------------------- web push (task reminders & nudges)
+// ---------------------------------------------------------------- web push (reminders, nudges, companion)
+// A push may carry up to two action buttons plus ONE signed, single-use, short-lived `token`. A button tap POSTs the
+// token straight to the API (no session needed), so the loop closes from the lock screen without opening the app.
+// iOS web push shows no buttons: there the body tap deep-links into the app (/?a=checkin ...), which finishes the job.
+const ICON = '/favicon.svg';
+
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -87,29 +92,80 @@ self.addEventListener('push', (event) => {
   }
   const title = typeof data.title === 'string' && data.title ? data.title : "Lock'in";
   const url = typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/';
+  const tag = typeof data.tag === 'string' && data.tag ? data.tag : '';
+  const token = typeof data.token === 'string' && data.token ? data.token : '';
+  const api = typeof data.api === 'string' && /^https:\/\//.test(data.api) ? data.api : '';
   const options = {
     body: typeof data.body === 'string' ? data.body : '',
-    icon: '/favicon.svg',
-    data: { url },
+    icon: ICON,
+    data: { url, token, api, tag },
   };
-  if (typeof data.tag === 'string' && data.tag) {
-    options.tag = data.tag; // same tag replaces the earlier notification instead of stacking
+  if (tag) {
+    options.tag = tag; // same tag replaces the earlier notification instead of stacking
     options.renotify = true;
+  }
+  if (token && Array.isArray(data.actions)) {
+    options.actions = data.actions
+      .filter((a) => a && typeof a.action === 'string' && typeof a.title === 'string')
+      .slice(0, 2)
+      .map((a) => ({ action: a.action, title: a.title.slice(0, 24) }));
   }
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
-      for (const client of windows) {
-        if ('focus' in client) {
-          return client.focus().then((focused) => (focused && 'navigate' in focused ? focused.navigate(url) : focused));
-        }
+async function postAction(d, action) {
+  const base = (d.api || self.location.origin).replace(/\/$/, '');
+  return fetch(`${base}/actions/${encodeURIComponent(d.token)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+    credentials: 'omit',
+  });
+}
+
+// Replace the notification with a one-line result, then take it away again. Never leaves clutter behind.
+async function flash(message, tag) {
+  const t = tag || 'lockin-result';
+  await self.registration.showNotification(message, { tag: t, silent: true, icon: ICON, data: { url: '/' } });
+  await new Promise((resolve) => setTimeout(resolve, 3500));
+  const open = await self.registration.getNotifications({ tag: t });
+  open.forEach((n) => n.close());
+}
+
+function openApp(url) {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+    for (const client of windows) {
+      if ('focus' in client) {
+        return client.focus().then((focused) => (focused && 'navigate' in focused ? focused.navigate(url) : focused));
       }
-      return self.clients.openWindow(url);
-    })
-  );
+    }
+    return self.clients.openWindow(url);
+  });
+}
+
+async function runButton(d, action) {
+  try {
+    const res = await postAction(d, action);
+    if (res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (body && body.status !== 'failed') return flash(body.message || 'Done', d.tag);
+    }
+    // 401 / 410 (expired) / 429 / a failed action: don't pretend it worked. Hand over to the app.
+  } catch (_) {
+    // offline: the server never saw it, so nothing was consumed. Open the app instead.
+  }
+  return openApp(d.url || '/');
+}
+
+self.addEventListener('notificationclick', (event) => {
+  const n = event.notification;
+  const d = n.data || {};
+  n.close();
+  if (event.action && d.token) {
+    event.waitUntil(runButton(d, event.action));
+    return;
+  }
+  // Body tap: open the deep link and (best effort) tell the server it was seen, which keeps the anti-nag backoff honest.
+  const seen = d.token ? postAction(d, 'open').catch(() => {}) : Promise.resolve();
+  event.waitUntil(Promise.all([openApp(d.url || '/'), seen]));
 });

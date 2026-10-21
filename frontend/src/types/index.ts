@@ -334,7 +334,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   next_step?: string | null;
-  mode?: 'answer' | 'support' | 'no_data' | 'fallback' | null;
+  mode?: 'answer' | 'support' | 'no_data' | 'fallback' | 'action' | null;
+  actions?: ActionCard[];
   cited_days: string[];
   narrated: boolean;
   model?: string | null;
@@ -505,4 +506,19 @@ export interface NotificationPrefs {
   max_per_day: number;
   devices: number;
   push_available: boolean;
+  companion_enabled: boolean;
+  checkin_hour: number;
+  plan_cues_in_quiet: boolean;
+  discreet_push: boolean;
+}
+
+/** What the Companion did (applied, with an undo payload) or wants to do (pending, with args to confirm). */
+export interface ActionCard {
+  id: string;
+  tool: string;
+  status: 'applied' | 'pending' | 'failed';
+  summary: string;
+  reason?: string | null;
+  args?: Record<string, unknown> | null;
+  undo?: Record<string, unknown> | null;
 }

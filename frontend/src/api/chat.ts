@@ -87,3 +87,25 @@ export async function sendMessage(
     body: JSON.stringify({ message, thread_id: threadId || null }),
   });
 }
+
+// ---------------------------------------------------------------- agent actions (log / capture / move by chat)
+import type { ActionCard } from '../types';
+
+/** Apply a PENDING card. The server re-validates the args exactly like model output. */
+export async function confirmAction(card: ActionCard): Promise<ActionCard> {
+  if (isDemoMode()) return { ...card, status: 'applied', args: null };
+  return request<ActionCard>('/chat/actions/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ tool: card.tool, args: card.args ?? {} }),
+  });
+}
+
+/** The "Logged. Undo" chip: restores exactly what the action replaced, or removes what it created. */
+export async function undoAction(card: ActionCard): Promise<string> {
+  if (isDemoMode()) return 'Undone.';
+  const res = await request<{ message: string }>('/chat/actions/undo', {
+    method: 'POST',
+    body: JSON.stringify({ undo: card.undo ?? {} }),
+  });
+  return res.message;
+}

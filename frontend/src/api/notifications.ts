@@ -9,6 +9,10 @@ const DEMO_PREFS: NotificationPrefs = {
   max_per_day: 4,
   devices: 0,
   push_available: false,
+  companion_enabled: true,
+  checkin_hour: 21,
+  plan_cues_in_quiet: false,
+  discreet_push: true,
 };
 let demoPrefs: NotificationPrefs = { ...DEMO_PREFS };
 
@@ -23,6 +27,10 @@ export interface NotificationPrefsPatch {
   quiet_end?: string;
   nudge_hour?: number;
   max_per_day?: number;
+  companion_enabled?: boolean;
+  checkin_hour?: number;
+  plan_cues_in_quiet?: boolean;
+  discreet_push?: boolean;
 }
 
 export async function patchNotificationPrefs(patch: NotificationPrefsPatch): Promise<NotificationPrefs> {

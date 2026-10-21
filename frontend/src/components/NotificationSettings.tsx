@@ -148,6 +148,53 @@ export const NotificationSettings: React.FC = () => {
               />
             </span>
           </div>
+          <div className="pt-1 border-t border-line space-y-3">
+            <label className="flex items-center justify-between gap-3 font-small text-ink">
+              <span>Companion check-ins (habits, evening check-in, wind-down)</span>
+              <input
+                type="checkbox"
+                checked={prefs.companion_enabled}
+                onChange={(e) => save({ companion_enabled: e.target.checked })}
+                className="w-5 h-5"
+              />
+            </label>
+            {prefs.companion_enabled && (
+              <>
+                <label className="flex items-center justify-between gap-3 font-small text-ink">
+                  <span>Evening "Does today look normal?" from</span>
+                  <select
+                    value={prefs.checkin_hour}
+                    onChange={(e) => save({ checkin_hour: Number(e.target.value) })}
+                    className={field}
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {hourLabel(h)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center justify-between gap-3 font-small text-ink">
+                  <span>Keep lock-screen text neutral for sensitive plans</span>
+                  <input
+                    type="checkbox"
+                    checked={prefs.discreet_push}
+                    onChange={(e) => save({ discreet_push: e.target.checked })}
+                    className="w-5 h-5"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-3 font-small text-ink">
+                  <span>Let my own if-then plans through quiet hours</span>
+                  <input
+                    type="checkbox"
+                    checked={prefs.plan_cues_in_quiet}
+                    onChange={(e) => save({ plan_cues_in_quiet: e.target.checked })}
+                    className="w-5 h-5"
+                  />
+                </label>
+              </>
+            )}
+          </div>
           <label className="flex items-center justify-between gap-3 font-small text-ink">
             <span>Most notifications per day</span>
             <select

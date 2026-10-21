@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { getChatThreads, getThreadDetail, sendMessage } from '../api/chat';
 import { fetchSupport } from '../api/support';
 import { SupportCard } from '../components/SupportCard';
+import { ActionCards } from '../components/ActionCards';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
@@ -163,6 +164,8 @@ export const ChatView: React.FC = () => {
                   <span>{m.next_step}</span>
                 </div>
               )}
+
+              {m.actions && m.actions.length > 0 && <ActionCards cards={m.actions} />}
 
               {m.cited_days && m.cited_days.length > 0 && (
                 <div className="font-caption text-[11px] text-muted-text pt-1">Based on: {m.cited_days.join(', ')}</div>
