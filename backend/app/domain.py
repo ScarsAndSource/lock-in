@@ -406,6 +406,11 @@ class NotificationPrefs:
     max_per_day: int = 4
     pushes_sent_day: date | None = None
     pushes_sent: int = 0
+    # companion layer (migration 016)
+    companion_enabled: bool = True
+    checkin_hour: int = 21
+    plan_cues_in_quiet: bool = False
+    discreet_push: bool = True
 
 
 @dataclass(slots=True)
@@ -418,3 +423,19 @@ class PushSubscription:
     created_at: datetime
     user_agent: str | None = None
     fail_count: int = 0
+
+
+@dataclass(slots=True)
+class CompanionPush:
+    """
+    One actionable push that was sent. `key` makes a moment unique (the same key can never be sent twice),
+    `id` is the single-use handle inside a signed action token. Holds NO free text.
+    """
+    id: UUID
+    user_id: UUID
+    kind: str            # task | checkin | habit | risk | winddown | study
+    key: str
+    local_date: date
+    sent_at: datetime
+    acted_at: datetime | None = None
+    action: str | None = None

@@ -87,6 +87,10 @@ class NotificationPrefsOut(BaseModel):
     max_per_day: int
     devices: int
     push_available: bool            # false until VAPID keys are set on the server
+    companion_enabled: bool = True
+    checkin_hour: int = 21
+    plan_cues_in_quiet: bool = False
+    discreet_push: bool = True
 
 
 class NotificationPrefsPatch(BaseModel):
@@ -95,6 +99,10 @@ class NotificationPrefsPatch(BaseModel):
     quiet_end: time | None = None
     nudge_hour: Annotated[int | None, Field(ge=0, le=23)] = None
     max_per_day: Annotated[int | None, Field(ge=1, le=20)] = None
+    companion_enabled: bool | None = None
+    checkin_hour: Annotated[int | None, Field(ge=0, le=23)] = None
+    plan_cues_in_quiet: bool | None = None
+    discreet_push: bool | None = None
 
     @model_validator(mode="after")
     def _something(self) -> "NotificationPrefsPatch":

@@ -45,13 +45,14 @@ NO_DATA_REPLY = (
 
 @dataclass(slots=True)
 class ChatReply:
-    mode: str  # answer | support | no_data | fallback
+    mode: str  # answer | support | no_data | fallback | action
     reply: str
     next_step: str | None = None
     cited_days: list[str] = field(default_factory=list)
     narrated: bool = False
     model: str | None = None
     support: dict | None = None
+    actions: list = field(default_factory=list)   # ActionCard items (chat_agent.py); empty for plain answers
 
 
 class ChatService:

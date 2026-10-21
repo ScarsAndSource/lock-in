@@ -9,7 +9,7 @@ from app.config import Settings, get_settings
 from app.deps import get_chat_threads_service
 from app.ratelimit import rate_limit
 from app.routers.chat import _enforce_chat_limits
-from app.schemas_chat import SupportOut
+from app.schemas_chat import ActionCardOut, SupportOut
 from app.schemas_threads import (
     DeletedOut, MessageOut, RenameThreadRequest, SendMessageOut, SendMessageRequest,
     ThreadDetailOut, ThreadOut,
@@ -42,6 +42,9 @@ def _message_out(v: MessageView) -> MessageOut:
         cited_days=v.cited_days,
         narrated=v.narrated,
         model=v.model,
+        actions=[ActionCardOut(
+            id=c.id, tool=c.tool, status=c.status, summary=c.summary, reason=c.reason, args=c.args, undo=c.undo,
+        ) for c in v.actions],
         created_at=m.created_at,
     )
 

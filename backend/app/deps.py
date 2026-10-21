@@ -9,6 +9,7 @@ from app.db import AsyncSessionLocal, get_db
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.chat_thread_repository import SqlAlchemyChatThreadRepository
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
+from app.repositories.companion_repository import SqlAlchemyCompanionRepository
 from app.repositories.goal_repository import SqlAlchemyGoalRepository, SqlAlchemyIntentionRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.insight_repository import SqlAlchemyInsightRepository
@@ -25,7 +26,10 @@ from app.repositories.study_repository import SqlAlchemyStudySessionRepository, 
 from app.repositories.task_repository import SqlAlchemyTaskRepository
 from app.repositories.urge_repository import SqlAlchemyUrgeRepository
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor
+from app.services import push_actions
 from app.services.account_service import AccountService
+from app.services.actions_service import ActionsService
+from app.services.chat_agent import AgentChatService, AgentExecutor
 from app.services.chat_service import ChatService
 from app.services.chat_threads_service import ChatThreadsService
 from app.services.checkins_service import CheckinsService
@@ -319,27 +323,6 @@ def get_chat_service(
     return ChatService(stats, study, urges, goals, missions, profiles, scoped(llm, "chat"), clock)
 
 
-def get_chat_threads_service(
-    repo: SqlAlchemyChatThreadRepository = Depends(get_chat_thread_repository),
-    chat: ChatService = Depends(get_chat_service),
-    encryptor: FieldEncryptor = Depends(get_field_encryptor),
-    profiles: ProfileService = Depends(get_profile_service),
-    settings: Settings = Depends(get_settings),
-    clock: Clock = Depends(get_clock),
-) -> ChatThreadsService:
-    return ChatThreadsService(repo, chat, encryptor, profiles, settings.chat_retention_days, clock)
-
-
-def get_pause_shortcuts_service(
-    pauses: PausesService = Depends(get_pauses_service),
-    repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
-    habits: SqlAlchemyHabitRepository = Depends(get_habit_repository),
-    profiles: ProfileService = Depends(get_profile_service),
-    clock: Clock = Depends(get_clock),
-) -> PauseShortcutsService:
-    return PauseShortcutsService(pauses, repo, habits, profiles, clock)
-
-
 # ---- tasks, reminders, nudges, push (slice 11)
 def get_task_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyTaskRepository:
     return SqlAlchemyTaskRepository(session)
@@ -374,3 +357,71 @@ def get_notifications_service(
     clock: Clock = Depends(get_clock),
 ) -> NotificationsService:
     return NotificationsService(repo, tasks, pauses, profiles, sender, settings.push_allowed_host_suffixes, clock)
+
+
+def get_agent_executor(
+    habits: HabitsService = Depends(get_habits_service),
+    habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    sleep: SleepService = Depends(get_sleep_service),
+    sleep_repo: SqlAlchemySleepRepository = Depends(get_sleep_repository),
+    tasks: TasksService = Depends(get_tasks_service),
+    intentions: IntentionsService = Depends(get_intentions_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> AgentExecutor:
+    return AgentExecutor(
+        habits=habits, habit_repo=habit_repo, sleep=sleep, sleep_repo=sleep_repo, tasks=tasks,
+        intentions=intentions, profiles=profiles, clock=clock,
+    )
+
+
+def get_agent_chat_service(
+    chat: ChatService = Depends(get_chat_service),
+    llm: LLMClient = Depends(get_llm_client),
+    executor: AgentExecutor = Depends(get_agent_executor),
+    clock: Clock = Depends(get_clock),
+) -> AgentChatService:
+    return AgentChatService(chat, scoped(llm, "chat"), executor, clock)
+
+
+def get_chat_threads_service(
+    repo: SqlAlchemyChatThreadRepository = Depends(get_chat_thread_repository),
+    chat: AgentChatService = Depends(get_agent_chat_service),
+    encryptor: FieldEncryptor = Depends(get_field_encryptor),
+    profiles: ProfileService = Depends(get_profile_service),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+) -> ChatThreadsService:
+    return ChatThreadsService(repo, chat, encryptor, profiles, settings.chat_retention_days, clock)
+
+
+def get_pause_shortcuts_service(
+    pauses: PausesService = Depends(get_pauses_service),
+    repo: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    habits: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> PauseShortcutsService:
+    return PauseShortcutsService(pauses, repo, habits, profiles, clock)
+
+
+def get_companion_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyCompanionRepository:
+    return SqlAlchemyCompanionRepository(session)
+
+
+def get_action_secret(settings: Settings = Depends(get_settings)) -> bytes:
+    return push_actions.derive_secret(settings.push_action_secret, settings.field_encryption_key)
+
+
+def get_actions_service(
+    ledger: SqlAlchemyCompanionRepository = Depends(get_companion_repository),
+    tasks: TasksService = Depends(get_tasks_service),
+    checkins: CheckinsService = Depends(get_checkins_service),
+    habits: HabitsService = Depends(get_habits_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    secret: bytes = Depends(get_action_secret),
+    clock: Clock = Depends(get_clock),
+) -> ActionsService:
+    return ActionsService(
+        ledger=ledger, tasks=tasks, checkins=checkins, habits=habits, profiles=profiles, secret=secret, clock=clock,
+    )

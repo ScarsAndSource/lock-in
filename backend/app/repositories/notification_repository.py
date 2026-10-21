@@ -28,7 +28,8 @@ def _prefs(row: NotificationPrefsORM) -> NotificationPrefs:
     return NotificationPrefs(
         user_id=row.user_id, push_enabled=row.push_enabled, quiet_start=row.quiet_start, quiet_end=row.quiet_end,
         nudge_hour=row.nudge_hour, max_per_day=row.max_per_day, pushes_sent_day=row.pushes_sent_day,
-        pushes_sent=row.pushes_sent,
+        pushes_sent=row.pushes_sent, companion_enabled=row.companion_enabled, checkin_hour=row.checkin_hour,
+        plan_cues_in_quiet=row.plan_cues_in_quiet, discreet_push=row.discreet_push,
     )
 
 
@@ -53,7 +54,9 @@ class SqlAlchemyNotificationRepository:
         values = dict(
             push_enabled=prefs.push_enabled, quiet_start=prefs.quiet_start, quiet_end=prefs.quiet_end,
             nudge_hour=prefs.nudge_hour, max_per_day=prefs.max_per_day, pushes_sent_day=prefs.pushes_sent_day,
-            pushes_sent=prefs.pushes_sent, updated_at=now,
+            pushes_sent=prefs.pushes_sent, companion_enabled=prefs.companion_enabled,
+            checkin_hour=prefs.checkin_hour, plan_cues_in_quiet=prefs.plan_cues_in_quiet,
+            discreet_push=prefs.discreet_push, updated_at=now,
         )
         stmt = pg_insert(NotificationPrefsORM).values(user_id=prefs.user_id, **values).on_conflict_do_update(
             index_elements=[NotificationPrefsORM.user_id], set_=values,

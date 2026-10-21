@@ -350,7 +350,25 @@ class NotificationPrefsORM(Base):
     max_per_day: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=4)
     pushes_sent_day: Mapped[date_ | None] = mapped_column(Date, nullable=True)
     pushes_sent: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    companion_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    checkin_hour: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=21)
+    plan_cues_in_quiet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    discreet_push: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CompanionPushORM(Base):
+    __tablename__ = "companion_pushes"
+    __table_args__ = (UniqueConstraint("user_id", "key", name="companion_pushes_user_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    key: Mapped[str] = mapped_column(Text, nullable=False)
+    local_date: Mapped[date_] = mapped_column(Date, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    acted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    action: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PushSubscriptionORM(Base):

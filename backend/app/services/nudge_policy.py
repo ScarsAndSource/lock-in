@@ -16,7 +16,7 @@ Design (SPEC section 6 reminder principle + section 8 "no escalating guilt notif
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -40,6 +40,14 @@ class PushMessage:
     body: str
     tag: str          # same tag replaces the earlier notification instead of stacking
     digest: bool
+    # --- actionable pushes (companion layer). All defaulted, so plain task pushes keep working unchanged.
+    kind: str = "task"                      # task | task-digest | checkin | habit | risk | winddown | study
+    key: str | None = None                  # unique moment id; a message with a key is tracked in the push ledger
+    args: dict = field(default_factory=dict)  # str -> str, travels inside the signed action token
+    actions: tuple[tuple[str, str], ...] = ()  # (action id, button label); max 2 so every platform shows them
+    url: str = "/"                          # where tapping the body goes (deep link, handled by the app)
+    priority: int = 50                      # higher goes first when the daily budget is tight
+    ttl_minutes: int = 360                  # how long the buttons keep working
 
 
 def min_gap(task: Task) -> timedelta:
@@ -144,7 +152,9 @@ def plan_pushes(
     out = [
         PushMessage(
             task_ids=(t.id,), title=_shorten(t.title, TITLE_PUSH_CHARS), body=reason(t, now, tz),
-            tag=f"task-{t.id}", digest=False,
+            tag=f"task-{t.id}", digest=False, kind="task", key=f"task:{t.id}:{t.nudge_count}",
+            args={"task_id": str(t.id)}, actions=(("done", "Done"), ("snooze", "Snooze 1h")),
+            url="/?a=tasks", priority=70, ttl_minutes=24 * 60,
         )
         for t in singles
     ]
@@ -161,5 +171,6 @@ def plan_pushes(
         label = f"{len(digest_items)} {noun}"
         out.append(PushMessage(
             task_ids=tuple(t.id for t in digest_items), title=label, body=body, tag="digest", digest=True,
+            kind="task-digest", url="/?a=tasks", priority=30,
         ))
     return out

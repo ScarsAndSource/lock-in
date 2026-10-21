@@ -22,6 +22,7 @@ from app.deps import (  # noqa: E402
     get_llm_client, get_mission_repository, get_mood_repository, get_pause_repository, get_profile_repository, get_retro_repository,
     get_screen_time_repository, get_sleep_repository, get_study_session_repository,
     get_subject_repository, get_urge_repository,
+    get_companion_repository, get_notification_repository, get_task_repository,
 )
 from app.main import app  # noqa: E402
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor  # noqa: E402
@@ -36,6 +37,9 @@ from tests.fakes import (  # noqa: E402
 from tests.fakes_slices import (  # noqa: E402
     InMemoryGoalRepository, InMemoryIntentionRepository, InMemoryStudySessionRepository,
     InMemorySubjectRepository, InMemoryUrgeRepository,
+)
+from tests.fakes_companion import (  # noqa: E402
+    InMemoryCompanionRepository, InMemoryNotificationRepository, InMemoryTaskRepository,
 )
 from tests.fakes_mood import InMemoryMoodRepository  # noqa: E402
 from tests.fakes_slice8 import InMemoryPauseRepository  # noqa: E402
@@ -91,11 +95,17 @@ class ApiWorld:
         self.chat_repo = InMemoryChatThreadRepository()
         self.pause_repo = InMemoryPauseRepository()
         self.mood_repo = InMemoryMoodRepository()
+        self.task_repo = InMemoryTaskRepository()
+        self.notif_repo = InMemoryNotificationRepository()
+        self.ledger = InMemoryCompanionRepository()
 
         app.dependency_overrides[get_habit_repository] = lambda: self.habit_repo
         app.dependency_overrides[get_chat_thread_repository] = lambda: self.chat_repo
         app.dependency_overrides[get_pause_repository] = lambda: self.pause_repo
         app.dependency_overrides[get_mood_repository] = lambda: self.mood_repo
+        app.dependency_overrides[get_task_repository] = lambda: self.task_repo
+        app.dependency_overrides[get_notification_repository] = lambda: self.notif_repo
+        app.dependency_overrides[get_companion_repository] = lambda: self.ledger
         app.dependency_overrides[get_checkin_repository] = lambda: self.checkin_repo
         app.dependency_overrides[get_sleep_repository] = lambda: self.sleep_repo
         app.dependency_overrides[get_screen_time_repository] = lambda: self.screen_time_repo

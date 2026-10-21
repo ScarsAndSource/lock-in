@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,8 +28,32 @@ class SupportOut(BaseModel):
     verified_on: str
 
 
+class ActionCardOut(BaseModel):
+    """What the agent did (applied + undo payload) or wants to do (pending + args to confirm). Live replies only."""
+    id: str
+    tool: str
+    status: Literal["applied", "pending", "failed"]
+    summary: str
+    reason: str | None = None
+    args: dict[str, Any] | None = None
+    undo: dict[str, Any] | None = None
+
+
+class ConfirmActionRequest(BaseModel):
+    tool: str = Field(min_length=1, max_length=40)
+    args: dict[str, Any]
+
+
+class UndoActionRequest(BaseModel):
+    undo: dict[str, Any]
+
+
+class UndoOut(BaseModel):
+    message: str
+
+
 class ChatOut(BaseModel):
-    mode: Literal["answer", "support", "no_data", "fallback"]
+    mode: Literal["answer", "support", "no_data", "fallback", "action"]
     reply: str
     next_step: str | None = None
     cited_days: list[str] = Field(default_factory=list)

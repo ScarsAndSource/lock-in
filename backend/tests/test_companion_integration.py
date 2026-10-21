@@ -1,0 +1,395 @@
+"""
+Companion layer, wired together: dispatch + ledger + planner on the in-memory world, the push-action endpoint
+(single use, tamper, expiry), and the agentic chat (act + undo + confirm + crisis bypass).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from app.deps import get_clock
+from app.domain import Intention, NotificationPrefs, PushSubscription, UrgeLog, UrgeOutcome
+from app.main import app
+from app.routers.actions import get_actions_factory
+from app.services import push_actions
+from app.services.actions_service import ActionsService
+from app.services.chat_service import ChatService
+from app.services.checkins_service import CheckinsService
+from app.services.companion_service import CompanionPlanner
+from app.services.habits_service import HabitsService
+from app.services.intentions_service import IntentionsService
+from app.services.notifications_service import NotificationsService
+from app.services.profile_service import ProfileService
+from app.services.push import PushOutcome
+from app.services.stats_service import StatsService
+from app.services.study_service import StudyService
+from app.services.tasks_service import TasksService
+
+UTC = timezone.utc
+SECRET = push_actions.derive_secret("", "test-key")
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def at_ist(h, m=0, day=14) -> datetime:                      # 2026-10-14 is a Wednesday
+    return datetime(2026, 10, day, h, m, tzinfo=timezone(timedelta(hours=5, minutes=30))).astimezone(UTC)
+
+
+class FakeSender:
+    configured = True
+
+    def __init__(self, outcome=PushOutcome.OK):
+        self.outcome, self.sent = outcome, []
+
+    async def send(self, sub, payload):
+        self.sent.append(payload)
+        return self.outcome
+
+
+def build(world, uid, now, sender=None, prefs=None):
+    """Real services on the in-memory repos, for user `uid`, clock pinned to `now`."""
+    world.now = now
+    clock = world._clock
+    run(world.profile_repo.set_timezone(uid, "Asia/Kolkata"))
+    if prefs:
+        world.notif_repo._default = prefs
+    profiles = ProfileService(world.profile_repo, clock)
+    stats = StatsService(world.habit_repo, world.sleep_repo, world.screen_time_repo, profiles, world.study_repo,
+                         world.urge_repo, world.pause_repo)
+    intentions = IntentionsService(world.intention_repo, world.habit_repo, world.subject_repo, stats, profiles, clock,
+                                   pauses=world.pause_repo)
+    planner = CompanionPlanner(world.ledger, world.habit_repo, world.checkin_repo, world.urge_repo, world.sleep_repo,
+                               world.goal_repo, StudyService(world.subject_repo, world.study_repo, clock), intentions,
+                               stats, world.pause_repo)
+    tasks = TasksService(world.task_repo, world.notif_repo, profiles, world.llm, clock)
+    checkins = CheckinsService(world.habit_repo, world.checkin_repo, world.encryptor, world.sleep_repo,
+                               world.screen_time_repo, clock, goals=world.goal_repo, pauses=world.pause_repo,
+                               mood_repo=world.mood_repo)
+    sender = sender or FakeSender()
+    notif = NotificationsService(world.notif_repo, world.task_repo, world.pause_repo, profiles, sender,
+                                 ["push.example.com"], clock, ledger=world.ledger, companion=planner,
+                                 action_secret=SECRET, api_url="https://api.example.com")
+    actions = ActionsService(ledger=world.ledger, tasks=tasks, checkins=checkins, habits=HabitsService(world.habit_repo, clock),
+                             profiles=profiles, secret=SECRET, clock=clock)
+    world.notif_repo.subs.append(PushSubscription(id=uuid4(), user_id=uid, endpoint="https://push.example.com/x",
+                                                  p256dh="k", auth="a", created_at=now))
+    return SimpleNamespace(notif=notif, actions=actions, sender=sender, tasks=tasks, planner=planner)
+
+
+def make_habit(world, uid, name="Gym", **kw):
+    from app.domain import TargetFrequency
+    return run(world.habit_repo.create_habit(uid, name, TargetFrequency(type="weekdays", days=tuple(range(7))), **kw))
+
+
+# =============================================================== dispatch + ledger
+def test_evening_checkin_push_is_actionable_and_never_double_sent(world, user_a):
+    make_habit(world, user_a)
+    s = build(world, user_a, at_ist(21, 10))
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert p["title"] == "Does today look normal?" and [a["action"] for a in p["actions"]] == ["lock", "rough"]
+    assert p["api"] == "https://api.example.com" and p["url"] == "/?a=checkin"
+    claims = push_actions.verify(SECRET, p["token"], world.now)
+    assert claims.user_id == user_a and claims.kind == "checkin" and set(claims.allowed) == {"lock", "rough"}
+    world.now += timedelta(minutes=5)                                   # next cron run: same moment, nothing new
+    assert run(s.notif.dispatch(user_a)).sent == 0 and len(s.sender.sent) == 1
+
+
+def test_failed_delivery_releases_the_ledger_so_the_next_run_retries(world, user_a):
+    make_habit(world, user_a)
+    s = build(world, user_a, at_ist(21, 10), sender=FakeSender(PushOutcome.FAILED))
+    assert run(s.notif.dispatch(user_a)).sent == 0 and world.ledger.rows == {}
+    s.sender.outcome = PushOutcome.OK
+    assert run(s.notif.dispatch(user_a)).sent == 1
+
+
+def test_one_shared_budget_between_tasks_and_companion(world, user_a):
+    make_habit(world, user_a)
+    s = build(world, user_a, at_ist(21, 10), prefs=NotificationPrefs(user_id=user_a, max_per_day=1))
+    world.now = at_ist(18)
+    run(s.tasks.create(user_a, "Submit lab report", None, 3, "2026-10-14T20:00", None, None))
+    world.now = at_ist(21, 10)                                          # the deadline passed while they were away
+    assert run(s.notif.dispatch(user_a)).sent == 1                      # cap is 1 for BOTH kinds together
+    assert s.sender.sent[0]["kind"] == "task"                           # the overdue deadline outranks the check-in
+    assert run(s.notif.dispatch(user_a)).reason == "daily cap reached"
+
+
+def test_task_push_carries_done_and_snooze_buttons(world, user_a):
+    s = build(world, user_a, at_ist(10))
+    run(s.tasks.create(user_a, "Pay fees", None, 3, "2026-10-14T11:00", None, None))
+    world.now = at_ist(12)
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert [a["action"] for a in p["actions"]] == ["done", "snooze"] and p["token"]
+
+
+def test_companion_is_silent_for_a_user_who_turned_it_off_or_is_paused(world, user_a):
+    make_habit(world, user_a)
+    s = build(world, user_a, at_ist(21, 10), prefs=NotificationPrefs(user_id=user_a, companion_enabled=False))
+    assert run(s.notif.dispatch(user_a)).sent == 0
+
+
+def test_urge_risk_window_pushes_own_plan_discreetly_and_only_if_allowed_in_quiet_hours(world, user_a):
+    now = at_ist(22, 40)                                                # inside quiet hours 22:00-08:00
+    run(world.intention_repo.create(Intention(id=uuid4(), user_id=user_a, linked_domain="urge",
+                                              cue="it is 11pm", action="laptop out of bed", created_at=now)))
+    for d in (1, 3, 6, 8, 10, 12):                                      # six late-night urges in October, 23:xx IST
+        when = at_ist(23, 10, day=d)
+        run(world.urge_repo.add(UrgeLog(id=uuid4(), user_id=user_a, occurred_at=when, log_date=when.date(),
+                                        outcome=UrgeOutcome.RESISTED)))
+    s = build(world, user_a, now)
+    assert run(s.notif.dispatch(user_a)).sent == 0                      # quiet hours win by default
+    world.notif_repo._default = NotificationPrefs(user_id=user_a, plan_cues_in_quiet=True)
+    assert run(s.notif.dispatch(user_a)).sent == 1
+    p = s.sender.sent[0]
+    assert p["kind"] == "risk" and p["title"] == "Your plan"
+    assert "laptop" not in json.dumps(p) and "urge" not in json.dumps(p).lower()   # nothing sensitive on the lock screen
+
+
+# =============================================================== action endpoint
+@pytest.fixture
+def act(world, user_a):
+    """Token endpoint wired to in-memory services; returns (stack, client)."""
+    make_habit(world, user_a, "Gym", floor_text="10-min walk")
+    stack = build(world, user_a, at_ist(21, 10))
+
+    @asynccontextmanager
+    async def factory(_uid):
+        yield stack.actions
+
+    app.dependency_overrides[get_actions_factory] = lambda: factory
+    from app.deps import get_action_secret
+    app.dependency_overrides[get_action_secret] = lambda: SECRET
+    yield stack, world.client_as(user_a)       # signed in: only /actions/in-app needs it; the token route ignores it
+
+
+def _checkin_token(world, stack, user_a):
+    run(stack.notif.dispatch(user_a))
+    return stack.sender.sent[0]["token"]
+
+
+def test_lock_it_closes_the_day_from_the_lock_screen_and_is_single_use(world, user_a, act):
+    stack, client = act
+    token = _checkin_token(world, stack, user_a)
+    r = client.post(f"/actions/{token}", json={"action": "lock"})
+    assert r.status_code == 200 and r.json() == {"status": "done", "message": "Locked. Day closed."}
+    assert run(world.checkin_repo.get(user_a, date(2026, 10, 14))).confirmed_at is not None
+    again = client.post(f"/actions/{token}", json={"action": "lock"})
+    assert again.json()["status"] == "already"                          # double tap / replay does nothing
+
+
+def test_rough_day_logs_floor_versions_and_guesses_nothing_else(world, user_a, act):
+    stack, client = act
+    token = _checkin_token(world, stack, user_a)
+    assert client.post(f"/actions/{token}", json={"action": "rough"}).json()["status"] == "done"
+    log = next(iter(world.habit_repo._logs.values()))
+    assert log.status.value == "floor" and log.is_default is False
+    assert run(world.sleep_repo.get_log(user_a, date(2026, 10, 14))) is None
+
+
+def test_token_cannot_do_what_it_was_not_minted_for_and_forged_or_expired_tokens_fail(world, user_a, act):
+    stack, client = act
+    token = _checkin_token(world, stack, user_a)
+    assert client.post(f"/actions/{token}", json={"action": "done"}).status_code == 422     # not in this push's actions
+    body, sig = token.split(".")
+    assert client.post(f"/actions/{body}.{sig[::-1]}", json={"action": "lock"}).status_code == 401
+    assert client.post("/actions/junk", json={"action": "lock"}).status_code == 401
+    world.now += timedelta(hours=7)
+    assert client.post(f"/actions/{token}", json={"action": "lock"}).status_code == 410
+    # nothing above consumed or changed anything
+    assert all(r.acted_at is None for r in world.ledger.rows.values())
+
+
+def test_token_for_one_user_cannot_touch_another_users_data(world, user_a, user_b, act):
+    stack, client = act
+    other = make_habit(world, user_b, "Secret")
+    forged = push_actions.mint(SECRET, user_id=user_a, push_id=uuid4(), kind="habit",
+                               args={"habit_id": str(other.id), "date": "2026-10-14"}, allowed=("done",),
+                               expires_at=world.now + timedelta(hours=1))
+    # a valid signature but no ledger row: it was never issued, so it is refused rather than executed
+    assert client.post(f"/actions/{forged}", json={"action": "done"}).json()["status"] == "already"
+    assert world.habit_repo._logs == {}
+
+
+def test_habit_floor_and_task_actions(world, user_a, act):
+    stack, client = act
+    h = next(iter(world.habit_repo._habits.values()))
+    for kind, action, args, check in (
+        ("habit", "floor", {"habit_id": str(h.id), "date": "2026-10-14"}, "Floor version logged. It counts."),
+    ):
+        pid = uuid4()
+        run(world.ledger.reserve(__import__("app.domain", fromlist=["CompanionPush"]).CompanionPush(
+            id=pid, user_id=user_a, kind=kind, key=f"{kind}:t", local_date=date(2026, 10, 14), sent_at=world.now)))
+        tok = push_actions.mint(SECRET, user_id=user_a, push_id=pid, kind=kind, args=args, allowed=(action,),
+                                expires_at=world.now + timedelta(hours=1))
+        assert client.post(f"/actions/{tok}", json={"action": action}).json()["message"] == check
+    t = run(stack.tasks.create(user_a, "Call Nani", None, 2, None, None, None))
+    r = client.post("/actions/in-app", json={"kind": "task", "action": "snooze", "args": {"task_id": str(t.task.id)}})
+    assert r.json()["status"] == "done"
+    assert world.task_repo.rows[t.task.id].snoozed_until == world.now + timedelta(minutes=60)
+    assert client.post("/actions/in-app", json={"kind": "task", "action": "nope", "args": {}}).status_code == 422
+
+
+def test_action_on_a_deleted_task_fails_politely(world, user_a, act):
+    stack, client = act
+    r = client.post("/actions/in-app", json={"kind": "task", "action": "done", "args": {"task_id": str(uuid4())}})
+    assert r.status_code == 200 and r.json()["status"] == "failed"
+
+
+# =============================================================== agentic chat
+def _say(client, text, **kw):
+    r = client.post("/chat/messages", json={"message": text, **kw})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _plan(*actions, wants_answer=False):
+    return json.dumps({"actions": list(actions), "wants_answer": wants_answer})
+
+
+def test_one_sentence_becomes_three_actions_and_each_is_undoable(world, user_a):
+    c = world.client_as(user_a)
+    gym = make_habit(world, user_a, "Gym")
+    world.llm.replies = [_plan(
+        {"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "skipped", "day": "today"}, "confidence": "high"},
+        {"tool": "log_sleep", "args": {"bed": "01:00", "woke": None, "quality": None, "day": "today"}, "confidence": "high"},
+        {"tool": "capture_task", "args": {"title": "Call mom", "importance": 1, "due": "2026-10-16", "remind": None,
+                                           "repeat_days": None, "notes": None}, "confidence": "high"},
+    )]
+    world.now = at_ist(9)
+    out = _say(c, "Slept at 1, skipped gym, remind me to call mom Friday")
+    reply = out["reply"]
+    assert reply["mode"] == "action" and [a["status"] for a in reply["actions"]] == ["applied"] * 3
+    assert "Gym" in reply["content"] and "Call mom" in reply["content"]
+    assert len(world.llm.calls) == 1                                    # ONE model call for three writes
+    assert next(iter(world.habit_repo._logs.values())).status.value == "skipped"
+    assert run(world.sleep_repo.get_log(user_a, date(2026, 10, 14))).time_to_bed == time(1, 0)
+    assert [t.title for t in world.task_repo.rows.values()] == ["Call mom"]
+
+    for card in reply["actions"]:
+        assert c.post("/chat/actions/undo", json={"undo": card["undo"]}).status_code == 200
+    assert world.habit_repo._logs == {} and run(world.sleep_repo.get_log(user_a, date(2026, 10, 14))) is None
+    assert world.task_repo.rows == {}
+
+
+def test_undo_restores_a_previous_value_not_just_deletes(world, user_a):
+    c = world.client_as(user_a)
+    gym = make_habit(world, user_a, "Gym")
+    world.now = at_ist(9)
+    c.post(f"/habits/{gym.id}/logs", json={"log_date": "2026-10-14", "status": "done"})
+    world.llm.replies = [_plan({"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "skipped"}, "confidence": "high"})]
+    card = _say(c, "I skipped gym actually")["reply"]["actions"][0]
+    assert next(iter(world.habit_repo._logs.values())).status.value == "skipped"
+    c.post("/chat/actions/undo", json={"undo": card["undo"]})
+    assert next(iter(world.habit_repo._logs.values())).status.value == "done"
+
+
+def test_invented_ids_and_bad_values_are_dropped_not_guessed(world, user_a):
+    c = world.client_as(user_a)
+    make_habit(world, user_a, "Gym")
+    world.now = at_ist(9)
+    world.llm.replies = [_plan(
+        {"tool": "log_habit", "args": {"habit_id": str(uuid4()), "status": "done"}, "confidence": "high"},
+        {"tool": "log_sleep", "args": {"bed": "25:99", "woke": None}, "confidence": "high"},
+        {"tool": "format_disk", "args": {}, "confidence": "high"},
+        {"tool": "complete_task", "args": {"task_id": str(uuid4())}, "confidence": "high"},
+    )]
+    world.llm.replies.append(json.dumps({"answer": "x"}))               # the chat fallback may run; it needs data -> no_data
+    out = _say(c, "mark gym done")
+    assert out["reply"]["actions"] == [] and world.habit_repo._logs == {}
+
+
+def test_ambiguous_writes_wait_for_a_tap_and_confirm_revalidates(world, user_a):
+    c = world.client_as(user_a)
+    gym = make_habit(world, user_a, "Gym")
+    world.now = at_ist(9)
+    world.llm.replies = [_plan(
+        {"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "done"}, "confidence": "low"},
+        {"tool": "set_intention", "args": {"domain": "urge", "cue": "it is 11pm", "action": "phone out of room"}, "confidence": "high"},
+    )]
+    cards = _say(c, "log that gym thing and if it is 11pm then phone out of room")["reply"]["actions"]
+    assert [x["status"] for x in cards] == ["pending", "pending"] and world.habit_repo._logs == {}
+    assert run(world.intention_repo.list(user_a)) == []
+    done = c.post("/chat/actions/confirm", json={"tool": cards[0]["tool"], "args": cards[0]["args"]})
+    assert done.json()["status"] == "applied" and len(world.habit_repo._logs) == 1
+    tampered = dict(cards[0]["args"], habit_id=str(uuid4()))
+    assert c.post("/chat/actions/confirm", json={"tool": "log_habit", "args": tampered}).status_code == 422
+    plan = c.post("/chat/actions/confirm", json={"tool": cards[1]["tool"], "args": cards[1]["args"]}).json()
+    assert plan["status"] == "applied" and len(run(world.intention_repo.list(user_a))) == 1
+    assert c.post("/chat/actions/undo", json={"undo": plan["undo"]}).status_code == 200
+    assert run(world.intention_repo.list(user_a)) == []
+
+
+def test_crisis_text_never_reaches_the_planner(world, user_a):
+    c = world.client_as(user_a)
+    out = _say(c, "I did it all wrong, I want to end my life, remind me to call mom")
+    assert out["reply"]["mode"] == "support" and world.llm.calls == []
+
+
+def test_plain_questions_skip_the_planner_entirely(world, user_a):
+    c = world.client_as(user_a)
+    out = _say(c, "How does my sleep affect my mood?")
+    assert out["reply"]["mode"] == "no_data" and world.llm.calls == []   # gate false -> legacy chat path, no extra call
+
+
+def test_planner_outage_falls_back_to_the_normal_chat(world, user_a):
+    from app.services.llm import LLMUnavailableError
+    c = world.client_as(user_a)
+    world.llm.error = LLMUnavailableError("down")
+    out = _say(c, "remind me to call mom tomorrow")
+    assert out["reply"]["mode"] == "no_data" and out["reply"]["actions"] == [] and world.task_repo.rows == {}
+
+
+def test_move_a_reminder_and_snooze_a_task_by_chat(world, user_a):
+    c = world.client_as(user_a)
+    world.now = at_ist(9)
+    run(world.profile_repo.set_timezone(user_a, "Asia/Kolkata"))
+    t = run(TasksService(world.task_repo, world.notif_repo, ProfileService(world.profile_repo, world._clock), world.llm,
+                         world._clock).create(user_a, "Lab report", None, 3, "2026-10-15", "2026-10-14T18:00", None))
+    tid = str(t.task.id)
+    world.llm.replies = [_plan(
+        {"tool": "reschedule_task", "args": {"task_id": tid, "due": None, "remind": "2026-10-14T20:30"}, "confidence": "high"},
+        {"tool": "snooze_task", "args": {"task_id": tid, "minutes": 90}, "confidence": "high"})]
+    cards = _say(c, "move my lab report reminder to 8:30pm and snooze it 90 minutes")["reply"]["actions"]
+    assert [x["status"] for x in cards] == ["applied", "applied"]
+    row = world.task_repo.rows[t.task.id]
+    assert row.remind_at == at_ist(20, 30) and row.snoozed_until == world.now + timedelta(minutes=90)
+    c.post("/chat/actions/undo", json={"undo": cards[1]["undo"]})
+    c.post("/chat/actions/undo", json={"undo": cards[0]["undo"]})
+    row = world.task_repo.rows[t.task.id]
+    assert row.remind_at == at_ist(18, 0) and row.snoozed_until is None
+
+
+def test_action_and_question_in_one_message(world, user_a):
+    from app.domain import HabitLog, HabitStatus
+    c = world.client_as(user_a)
+    gym = make_habit(world, user_a, "Gym")
+    world.now = at_ist(9)
+    for i in range(1, 4):                                               # some logged history so chat has facts
+        run(world.habit_repo.upsert_log(HabitLog(habit_id=gym.id, user_id=user_a, log_date=date(2026, 10, 14) - timedelta(days=i),
+                                                 status=HabitStatus.DONE)))
+    world.llm.replies = [
+        _plan({"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "done"}, "confidence": "high"}, wants_answer=True),
+        json.dumps({"answer": "Gym is on a run. Keep the same cue tomorrow.", "cited_days": ["2026-10-13"],
+                    "next_step": "Same cue tomorrow."}),
+    ]
+    reply = _say(c, "I did gym, how am I doing overall?")["reply"]
+    assert reply["actions"][0]["status"] == "applied" and "Gym" in reply["content"]
+
+
+def test_gate_is_permissive_for_commands_and_quiet_for_questions():
+    from app.services.chat_agent import looks_actionable as g
+    for yes in ("log gym done", "I skipped the gym", "slept at 1am", "remind me to call mom friday", "gym kar diya",
+                "if I feel the urge then walk", "snooze lab report 1h", "I woke at 7"):
+        assert g(yes), yes
+    for no in ("Why do I keep skipping gym on Thursdays?", "How does screen time affect my sleep?",
+               "what's my worst habit?", "hi"):
+        assert not g(no), no

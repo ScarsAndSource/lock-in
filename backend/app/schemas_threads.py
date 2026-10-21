@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.schemas_chat import SupportOut
+from app.schemas_chat import ActionCardOut, SupportOut
 
 
 class ThreadOut(BaseModel):
@@ -22,10 +22,11 @@ class MessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     next_step: str | None = None
-    mode: Literal["answer", "support", "no_data", "fallback"] | None = None  # assistant messages only
+    mode: Literal["answer", "support", "no_data", "fallback", "action"] | None = None  # assistant messages only
     cited_days: list[str] = Field(default_factory=list)
     narrated: bool = False
     model: str | None = None
+    actions: list[ActionCardOut] = Field(default_factory=list)  # only on the live reply that did something
     created_at: datetime
 
 

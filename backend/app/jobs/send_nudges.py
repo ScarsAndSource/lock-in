@@ -1,9 +1,13 @@
 """
-Nudge dispatch job. Run every 5 minutes as a Cron Job:  python -m app.jobs.send_nudges
+Nudge + companion dispatch job. Run every 5 minutes as a Cron Job:  python -m app.jobs.send_nudges
 
-What it does: for each user who has a registered device AND an open task that could be triggering soon, it asks
-NotificationsService.dispatch() what (if anything) to push right now. The policy (backoff, quiet hours, digest,
-pause, daily cap) lives in services/nudge_policy.py; this file only walks users.
+What it does: for each user who has a registered device (and has not switched pushes off), it asks
+NotificationsService.dispatch() what (if anything) to push right now. That covers task reminders AND the companion
+moments (check-in, habits, risk windows, wind-down, study) under ONE daily budget. The policies (backoff, quiet hours,
+digest, pause, daily cap) live in services/nudge_policy.py and services/companion_policy.py; this file only walks users.
+Before the companion layer only users with an open task were candidates; now everyone with a device is, because
+"never opens the app" must not mean "never hears about anything that matters". Data is loaded lazily per user, so
+a quiet user costs a couple of cheap queries.
 
 RLS: listing "who has devices + open tasks" must see ALL users, so that one query runs on a plain session (owner
 connection, no `set local role`). Every per-user step then runs in its own transaction with that user's RLS
@@ -15,40 +19,31 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, apply_rls_context
-from app.models import PushSubscriptionORM, TaskORM
-from app.repositories.notification_repository import SqlAlchemyNotificationRepository
-from app.repositories.pause_repository import SqlAlchemyPauseRepository
-from app.repositories.profile_repository import SqlAlchemyProfileRepository
-from app.repositories.task_repository import SqlAlchemyTaskRepository
-from app.services.notifications_service import NotificationsService
-from app.services.profile_service import ProfileService
+from app.models import NotificationPrefsORM, PushSubscriptionORM
+from app.services.companion_wiring import build_stack
 from app.services.push import PushSender, WebPushSender
 
 logger = logging.getLogger("lockin.jobs.nudges")
 
 MAX_USERS_PER_RUN = 5000
 PER_USER_TIMEOUT_SECONDS = 60
-# A bare-date task triggers at the person's nudge hour in THEIR timezone, which can be well over a day away from
-# UTC midnight; this margin keeps those users in the candidate list without scanning everyone.
-TRIGGER_LOOKAHEAD = timedelta(days=2)
 
 
 async def candidate_user_ids(clock: Clock = utc_now, limit: int = MAX_USERS_PER_RUN) -> list[UUID]:
-    horizon = clock() + TRIGGER_LOOKAHEAD
-    trigger = func.coalesce(TaskORM.remind_at, TaskORM.due_at)
-    has_open_trigger = select(TaskORM.user_id).where(
-        TaskORM.status == "open", or_(TaskORM.due_at.is_not(None), TaskORM.remind_at.is_not(None)),
-        trigger <= horizon,
+    """Everyone with a registered device who hasn't switched pushes off (no prefs row = defaults = on)."""
+    stmt = (
+        select(PushSubscriptionORM.user_id)
+        .outerjoin(NotificationPrefsORM, NotificationPrefsORM.user_id == PushSubscriptionORM.user_id)
+        .where(or_(NotificationPrefsORM.push_enabled.is_(None), NotificationPrefsORM.push_enabled.is_(True)))
+        .distinct()
     )
-    stmt = select(PushSubscriptionORM.user_id).where(PushSubscriptionORM.user_id.in_(has_open_trigger)).distinct()
     async with AsyncSessionLocal() as session:  # deliberately NO rls context: see module docstring
         rows = (await session.execute(stmt.limit(limit))).all()
     return sorted(r[0] for r in rows)
@@ -59,15 +54,7 @@ async def _run_user(user_id: UUID, sender: PushSender, settings: Settings, clock
         async with session.begin():  # one transaction per user: a failure rolls back only that user
             if settings.rls_enforced:
                 await apply_rls_context(session, user_id)
-            service = NotificationsService(
-                SqlAlchemyNotificationRepository(session),
-                SqlAlchemyTaskRepository(session),
-                SqlAlchemyPauseRepository(session),
-                ProfileService(SqlAlchemyProfileRepository(session), clock),
-                sender,
-                settings.push_allowed_host_suffixes,
-                clock,
-            )
+            service = build_stack(session, settings, clock, sender).notifications
             return (await service.dispatch(user_id)).sent
 
 

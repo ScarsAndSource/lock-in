@@ -22,6 +22,8 @@ async def _prefs_out(user_id: UUID, service: NotificationsService) -> Notificati
     return NotificationPrefsOut(
         push_enabled=prefs.push_enabled, quiet_start=prefs.quiet_start, quiet_end=prefs.quiet_end,
         nudge_hour=prefs.nudge_hour, max_per_day=prefs.max_per_day, devices=devices, push_available=available,
+        companion_enabled=prefs.companion_enabled, checkin_hour=prefs.checkin_hour,
+        plan_cues_in_quiet=prefs.plan_cues_in_quiet, discreet_push=prefs.discreet_push,
     )
 
 

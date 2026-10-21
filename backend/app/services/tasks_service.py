@@ -25,7 +25,9 @@ from app.services.llm import LLMClient
 from app.services.narration import sanitize_user_text
 from app.services.nudge_policy import classify, rank_key, trigger_at
 from app.services.profile_service import ProfileService
-from app.services.task_parser import MAX_CAPTURE_CHARS, MAX_NOTES, MAX_TITLE, fallback_parse, parse_capture
+from app.services.task_parser import (
+    MAX_CAPTURE_CHARS, MAX_NOTES, MAX_TITLE, ParsedTask, fallback_parse, parse_capture,
+)
 from app.services.task_time import END_OF_DAY, at_local, format_local, next_occurrence, parse_local, zone
 
 MAX_OPEN_TASKS = 200
@@ -117,7 +119,23 @@ class TasksService:
         mode = "parsed"
         if parsed is None:
             parsed, mode = fallback_parse(clean), "fallback"
+        return await self._create_parsed(user_id, parsed, clean, mode, now, tz, prefs, open_tasks)
 
+    async def capture_parsed(self, user_id: UUID, parsed: list[ParsedTask], source_text: str) -> CaptureResult:
+        """Create tasks that were ALREADY extracted and validated elsewhere (the chat agent), no second model call.
+        Same duplicate / limit / cadence rules as capture()."""
+        now, tz, _, prefs = await self._ctx(user_id)
+        open_tasks = await self._repo.list(user_id, "open")
+        if MAX_OPEN_TASKS - len(open_tasks) <= 0:
+            raise ValidationError(f"You already have {MAX_OPEN_TASKS} open tasks. Finish or drop some first.")
+        clean = sanitize_user_text(source_text or "", MAX_CAPTURE_CHARS)
+        return await self._create_parsed(user_id, parsed, clean, "parsed", now, tz, prefs, open_tasks)
+
+    async def _create_parsed(
+        self, user_id: UUID, parsed: list[ParsedTask], clean: str, mode: str, now: datetime, tz: ZoneInfo,
+        prefs: NotificationPrefs, open_tasks: list[Task],
+    ) -> CaptureResult:
+        room = MAX_OPEN_TASKS - len(open_tasks)
         existing = {t.title.casefold() for t in open_tasks}
         created: list[TaskView] = []
         skipped = 0
@@ -247,6 +265,53 @@ class TasksService:
     async def delete(self, user_id: UUID, task_id: UUID) -> None:
         if not await self._repo.delete(user_id, task_id):
             raise NotFoundError(f"No task {task_id} for this user.")
+
+    # ---------------------------------------------------------------- undo support (chat agent)
+    RESTORABLE = (
+        "status", "due_at", "due_has_time", "remind_at", "snoozed_until", "completed_at", "last_done_at",
+        "done_count", "nudge_count", "last_nudged_at",
+    )
+
+    @staticmethod
+    def snapshot(task: Task) -> dict:
+        """JSON-safe copy of the fields an agent action can change, for a one-tap Undo."""
+        out: dict = {}
+        for key in TasksService.RESTORABLE:
+            value = getattr(task, key)
+            out[key] = value.isoformat() if isinstance(value, datetime) else value
+        return out
+
+    async def get(self, user_id: UUID, task_id: UUID) -> Task:
+        return await self._get(user_id, task_id)
+
+    async def restore(self, user_id: UUID, task_id: UUID, fields: dict) -> TaskView:
+        """Put back what snapshot() recorded. Only RESTORABLE fields, only the right types; anything else is ignored."""
+        now, tz, _, prefs = await self._ctx(user_id)
+        task = await self._get(user_id, task_id)
+        for key in self.RESTORABLE:
+            if key not in fields:
+                continue
+            value = fields[key]
+            if key in ("due_at", "remind_at", "snoozed_until", "completed_at", "last_done_at", "last_nudged_at"):
+                try:
+                    value = datetime.fromisoformat(value) if value else None
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(f"Bad value for {key}.") from exc
+                if value is not None and value.tzinfo is None:
+                    raise ValidationError(f"Bad value for {key}.")
+            elif key == "status":
+                if value not in ("open", "done", "dropped"):
+                    raise ValidationError("Bad status.")
+            elif key == "due_has_time":
+                value = bool(value)
+            else:  # counters
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ValidationError(f"Bad value for {key}.")
+            setattr(task, key, value)
+        saved = await self._repo.save(task, now)
+        if saved is None:
+            raise NotFoundError(f"No task {task_id} for this user.")
+        return self._view(saved, now, prefs, tz)
 
     # ---------------------------------------------------------------- focus
     async def focus(self, user_id: UUID) -> Focus:

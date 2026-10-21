@@ -56,6 +56,7 @@ class MessageView:
     cited_days: list[str] = field(default_factory=list)
     narrated: bool = False
     model: str | None = None
+    actions: list = field(default_factory=list)   # live reply only: pending/undo payloads are not persisted
 
 
 @dataclass(slots=True)
@@ -194,15 +195,19 @@ class ChatThreadsService:
                 "cited_days": reply.cited_days,
                 "narrated": reply.narrated,
                 "model": reply.model,
+                # structure only, never free text (summaries live in the encrypted content)
+                **({"actions": [{"tool": c.tool, "status": c.status} for c in reply.actions]} if reply.actions else {}),
             },
             created_at=now + timedelta(milliseconds=1),
         ))
 
         count = await self._repo.count_messages(user_id, thread.id)
+        bot_view = self._message_view(bot_msg)
+        bot_view.actions = list(reply.actions)
         return SendResult(
             thread=self._thread_view(thread, count),
             user_message=self._message_view(user_msg),
-            reply=self._message_view(bot_msg),
+            reply=bot_view,
             support=reply.support,
         )
 
