@@ -450,6 +450,23 @@ class CompanionMomentORM(Base):
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+class SendOutcomeORM(Base):
+    __tablename__ = "send_outcomes"
+    __table_args__ = (
+        CheckConstraint("kind in ('morning', 'evening')", name="send_outcomes_kind_check"),
+        CheckConstraint("hour between 0 and 23", name="send_outcomes_hour_check"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    moment_date: Mapped[date_] = mapped_column(Date, primary_key=True)
+    hour: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    acted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ExperimentORM(Base):
     __tablename__ = "experiments"
 

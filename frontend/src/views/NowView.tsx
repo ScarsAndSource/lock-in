@@ -9,6 +9,7 @@ import { HabitChecklist } from '../components/HabitChecklist';
 import { TaskList } from '../components/TaskList';
 import { QuickAdd } from '../components/QuickAdd';
 import { StatusChips } from '../components/StatusChips';
+import { InferenceChip } from '../components/InferenceChip';
 import { SevenDayWeave } from '../components/SevenDayWeave';
 import { formatDayHeading } from '../lib/dates';
 
@@ -60,6 +61,7 @@ export const NowView: React.FC = () => {
       )}
 
       <QuickAdd onAdded={reloadAll} />
+      <InferenceChip />
       <StatusChips />
       <SevenDayWeave />
     </div>

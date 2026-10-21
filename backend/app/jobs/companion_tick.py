@@ -27,6 +27,8 @@ from app.db import AsyncSessionLocal, apply_rls_context
 from app.models import PushSubscriptionORM
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.companion_repository import SqlAlchemyCompanionRepository, prune_events
+from app.repositories.send_time_repository import SqlAlchemySendTimeRepository, prune_outcomes
+from app.services.send_time import SendTimeService
 from app.repositories.goal_repository import SqlAlchemyGoalRepository, SqlAlchemyIntentionRepository
 from app.repositories.habit_repository import SqlAlchemyHabitRepository
 from app.repositories.mood_repository import SqlAlchemyMoodRepository
@@ -77,8 +79,12 @@ def build_service(session, sender: PushSender, settings: Settings, clock: Clock)
     notifications = NotificationsService(
         notif_repo, task_repo, pauses, profiles, sender, settings.push_allowed_host_suffixes, clock,
     )
+    send_time = SendTimeService(
+        SqlAlchemySendTimeRepository(session), SqlAlchemyCompanionRepository(session), notif_repo, profiles, clock,
+    )
     return MomentsService(
         SqlAlchemyCompanionRepository(session), companion, notifications, notif_repo, pauses, profiles, sender, clock,
+        send_time,
     )
 
 
@@ -112,6 +118,7 @@ async def run_once(sender: PushSender | None = None, clock: Clock = utc_now) -> 
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 counts["pruned"] = await prune_events(session, now - EVENT_RETENTION)
+                counts["pruned"] += await prune_outcomes(session, (now - EVENT_RETENTION).date())
     logger.info("companion job finished: %s", counts)
     return counts
 

@@ -1,7 +1,7 @@
-\"\"\"
+"""
 Ledger of actionable pushes that were sent (migration 016) AND
 the companion spine events/moments (migration 018).
-\"\"\"
+"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta

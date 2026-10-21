@@ -27,6 +27,7 @@ from app.services.nudge_policy import PushMessage, in_quiet_hours
 from app.services.profile_service import ProfileService
 from app.services.push import PushSender
 from app.services.rhythm import moment_times
+from app.services.send_time import SendTimeService, adapt_moment_times
 from app.services.task_time import zone
 
 WINDOW_MIN = 90
@@ -49,11 +50,11 @@ class MomentsService:
     def __init__(
         self, repo: CompanionRepository, companion: CompanionService, notifications: NotificationsService,
         notif_repo: NotificationRepository, pauses, profiles: ProfileService, sender: PushSender,
-        clock: Clock = utc_now,
+        clock: Clock = utc_now, send_time: SendTimeService | None = None,
     ):
         self._repo, self._companion, self._notifications = repo, companion, notifications
         self._notif_repo, self._pauses, self._profiles = notif_repo, pauses, profiles
-        self._sender, self._clock = sender, clock
+        self._sender, self._clock, self._send_time = sender, clock, send_time
 
     async def tick(self, user_id: UUID) -> TickResult:
         if not self._sender.configured:
@@ -68,6 +69,8 @@ class MomentsService:
         tz = zone((await self._profiles.get(user_id)).timezone)
         local = now.astimezone(tz)
         today = local.date()
+        if self._send_time is not None:
+            await self._send_time.settle(user_id)          # yesterday-and-earlier outcomes; one cheap query
         if prefs.pushes_sent_day != today:
             prefs.pushes_sent_day, prefs.pushes_sent = today, 0
         if prefs.max_per_day - prefs.pushes_sent <= 0:
@@ -81,7 +84,10 @@ class MomentsService:
             return TickResult(False, "paused")
 
         data = await self._companion.now(user_id)
-        times = moment_times(data.rhythm, _minute(prefs.quiet_start), _minute(prefs.quiet_end))
+        qs, qe = _minute(prefs.quiet_start), _minute(prefs.quiet_end)
+        times = moment_times(data.rhythm, qs, qe)
+        if self._send_time is not None:
+            times = adapt_moment_times(times, await self._send_time.hours_for(user_id, times, qs, qe, today), qs, qe)
         due = next(
             (m for m in MOMENTS if m not in handled and 0 <= data.local_minute - times[m] <= WINDOW_MIN), None,
         )
