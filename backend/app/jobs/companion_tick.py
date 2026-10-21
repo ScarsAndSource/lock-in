@@ -25,6 +25,8 @@ from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, apply_rls_context
 from app.models import PushSubscriptionORM
+from app.repositories.calendar_repository import SqlAlchemyCalendarRepository
+from app.services.calendar_service import CalendarService
 from app.repositories.checkin_repository import SqlAlchemyCheckinRepository
 from app.repositories.companion_repository import SqlAlchemyCompanionRepository, prune_events
 from app.repositories.send_time_repository import SqlAlchemySendTimeRepository, prune_outcomes
@@ -73,8 +75,10 @@ def build_service(session, sender: PushSender, settings: Settings, clock: Clock)
     )
     # The companion only reads the task focus, which never touches the model, so no LLM client is needed here.
     tasks = TasksService(task_repo, notif_repo, profiles, None, clock)  # type: ignore[arg-type]
+    calendar = CalendarService(SqlAlchemyCalendarRepository(session), profiles, clock)
     companion = CompanionService(
         SqlAlchemyCompanionRepository(session), checkins, tasks, profiles, SqlAlchemyIntentionRepository(session), clock,
+        calendar,
     )
     notifications = NotificationsService(
         notif_repo, task_repo, pauses, profiles, sender, settings.push_allowed_host_suffixes, clock,

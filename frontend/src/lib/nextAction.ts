@@ -15,7 +15,7 @@ export type NextTarget =
 export interface NextAction {
   /** Stable id, so "Not now" can hide exactly this suggestion for the session. */
   key: string;
-  kind: 'floor' | 'deadline' | 'guard' | 'close' | 'habit' | 'task' | 'checkin' | 'clear';
+  kind: 'floor' | 'deadline' | 'guard' | 'close' | 'habit' | 'task' | 'checkin' | 'clear' | 'exam';
   eyebrow: string;
   title: string;
   detail: string | null;

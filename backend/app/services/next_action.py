@@ -19,12 +19,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.services.companion_voice import card_voice, why_line
+from app.services.exam_awareness import ExamNudge
 from app.services.rhythm import DAY, BUCKET, Rhythm, RiskWindow, evening_at, window_near
 
 SCORE_FLOOR, SCORE_DEADLINE, SCORE_GUARD, SCORE_CLOSE, SCORE_HABIT, SCORE_TASK, SCORE_CHECKIN = (
     100, 92, 88, 85, 60, 55, 30,
 )
-CONCRETE_KINDS = frozenset({"floor", "deadline", "habit", "task"})   # worth a morning push
+CONCRETE_KINDS = frozenset({"floor", "deadline", "habit", "task", "exam"})   # an exam is worth a morning push
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +79,7 @@ class NextInput:
     plan: str | None                # the person's own urge if-then action, when they wrote one
     seed: int                       # day number: keeps a line stable within a day
     skipped: frozenset[str] = frozenset()
+    exam: ExamNudge | None = None
 
 
 def _inside(window: RiskWindow, minute: int) -> bool:
@@ -164,6 +166,12 @@ def candidates(inp: NextInput) -> list[tuple[int, NextAction]]:
     other = next((t for t in inp.tasks if deadline is None or t.task_id != deadline.task_id), None)
     if other is not None:
         out.append((SCORE_TASK, _task(other, "task", inp)))
+    if inp.exam is not None:
+        x = inp.exam
+        out.append((x.score, NextAction(
+            key=x.key, kind="exam", eyebrow=x.eyebrow, title=x.title, detail=x.detail, cta=None,
+            target=Target("none"), why=None, voice=None,
+        )))
     out.sort(key=lambda pair: -pair[0])   # stable: equal scores keep insertion order
     return out
 

@@ -38,6 +38,8 @@ from app.services.media_service import MediaService
 from app.services.chat_service import ChatService
 from app.services.chat_threads_service import ChatThreadsService
 from app.services.checkins_service import CheckinsService
+from app.repositories.calendar_repository import SqlAlchemyCalendarRepository
+from app.services.calendar_service import CalendarService
 from app.services.companion_service import CompanionService
 from app.services.goals_service import GoalsService
 from app.services.habits_service import HabitsService
@@ -466,6 +468,18 @@ def get_ingest_service(
     return IngestService(tokens, sleep, sleep_repo, screen, profiles, secret, clock)
 
 # ---- companion (Phase 2)
+def get_calendar_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyCalendarRepository:
+    return SqlAlchemyCalendarRepository(session)
+
+
+def get_calendar_service(
+    repo: SqlAlchemyCalendarRepository = Depends(get_calendar_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> CalendarService:
+    return CalendarService(repo, profiles, clock)
+
+
 def get_companion_service(
     repo: SqlAlchemyCompanionRepository = Depends(get_companion_repository),
     checkins: CheckinsService = Depends(get_checkins_service),
@@ -473,8 +487,9 @@ def get_companion_service(
     profiles: ProfileService = Depends(get_profile_service),
     intentions: SqlAlchemyIntentionRepository = Depends(get_intention_repository),
     clock: Clock = Depends(get_clock),
+    calendar: CalendarService = Depends(get_calendar_service),
 ) -> CompanionService:
-    return CompanionService(repo, checkins, tasks, profiles, intentions, clock)
+    return CompanionService(repo, checkins, tasks, profiles, intentions, clock, calendar)
 
 # ---- experiments (N-of-1)
 def get_experiment_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyExperimentRepository:

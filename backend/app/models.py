@@ -467,6 +467,26 @@ class SendOutcomeORM(Base):
     settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CalendarEventORM(Base):
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "uid", "starts_at", name="calendar_events_source_uid_start"),
+        CheckConstraint("kind in ('exam', 'class', 'other')", name="calendar_events_kind_check"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    uid: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="other")
+    kind_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ExperimentORM(Base):
     __tablename__ = "experiments"
 

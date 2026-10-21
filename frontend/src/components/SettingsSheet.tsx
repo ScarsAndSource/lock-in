@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Sheet } from './Sheet';
 import { Disclosure } from './Disclosure';
 import { NotificationSettings } from './NotificationSettings';
+import { CalendarImport } from './CalendarImport';
 import {
   getProfile,
   patchProfile,
@@ -162,6 +163,10 @@ export const SettingsSheet: React.FC = () => {
           <div className="pt-2">
             <NotificationSettings />
           </div>
+        </Disclosure>
+
+        <Disclosure title="Calendar and exams">
+          <CalendarImport />
         </Disclosure>
 
         <Disclosure title="If-then plans" summary={`${intentions.length} active`}>

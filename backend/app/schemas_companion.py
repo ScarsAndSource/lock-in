@@ -14,7 +14,7 @@ class NextTargetOut(BaseModel):
 
 class NextActionOut(BaseModel):
     key: str
-    kind: Literal["floor", "deadline", "guard", "close", "habit", "task", "checkin", "clear"]
+    kind: Literal["floor", "deadline", "guard", "close", "habit", "task", "checkin", "clear", "exam"]
     eyebrow: str
     title: str
     detail: str | None = None

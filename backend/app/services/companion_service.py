@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from app.exceptions import ValidationError
 from app.services.nudge_policy import reason as task_reason
+from app.services.exam_awareness import exam_nudge
 from app.services.next_action import HabitFacts, NextAction, NextInput, TaskFacts, pick_next
 from app.services.profile_service import ProfileService
 from app.services.rhythm import Rhythm, build_rhythm
@@ -306,10 +307,10 @@ class CompanionNow:
 class CompanionService:
     def __init__(
         self, repo: CompanionRepository, checkins: CheckinsService, tasks: TasksService, profiles: ProfileService,
-        intentions: IntentionRepository, clock: Clock = utc_now,
+        intentions: IntentionRepository, clock: Clock = utc_now, calendar=None,
     ):
         self._repo, self._checkins, self._tasks, self._profiles = repo, checkins, tasks, profiles
-        self._intentions, self._clock = intentions, clock
+        self._intentions, self._clock, self._calendar = intentions, clock, calendar
 
     async def now(self, user_id: UUID, skipped: Iterable[str] = ()) -> CompanionNow:
         now = self._clock()
@@ -332,13 +333,16 @@ class CompanionService:
         )
         tone = resolve_tone(profile.tone_preference, view.bounce.slip_streak)
         local_minute = local.hour * 60 + local.minute
+        exam = None
+        if self._calendar is not None:
+            exam = exam_nudge(await self._calendar.upcoming_exams(user_id, today, tz), today, local_minute, tone)
         seed = today.toordinal()
         keys = frozenset(str(k)[:MAX_REF_CHARS] for k in list(skipped)[:MAX_SKIPPED])
 
         action = pick_next(NextInput(
             habits=habits, tasks=tasks, confirmed=view.already_confirmed, bounce=view.bounce.active,
             local_minute=local_minute, rhythm=rhythm, tone=tone, plan=plans[0].action if plans else None,
-            seed=seed, skipped=keys,
+            seed=seed, skipped=keys, exam=exam,
         ))
 
         scheduled = [h for h in habits if h.is_scheduled]
