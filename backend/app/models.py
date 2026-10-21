@@ -421,3 +421,31 @@ class ChatMessageORM(Base):
     next_step_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+class EventORM(Base):
+    __tablename__ = "events"
+    __table_args__ = (
+        CheckConstraint(
+            "kind in ('app_open', 'nba_shown', 'nba_acted', 'nba_skipped', 'push_opened')", name="events_kind_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"))
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class CompanionMomentORM(Base):
+    __tablename__ = "companion_moments"
+    __table_args__ = (CheckConstraint("moment in ('morning', 'evening')", name="companion_moments_moment_check"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("auth.users.id", ondelete="CASCADE"), primary_key=True
+    )
+    moment_date: Mapped[date_] = mapped_column(Date, primary_key=True)
+    moment: Mapped[str] = mapped_column(Text, primary_key=True)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

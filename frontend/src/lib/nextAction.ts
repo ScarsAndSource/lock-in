@@ -9,17 +9,21 @@ export type NextTarget =
   | { type: 'habit'; habitId: string; status: 'done' | 'floor' }
   | { type: 'task'; taskId: string }
   | { type: 'checkin' }
+  | { type: 'urge' }
   | { type: 'none' };
 
 export interface NextAction {
   /** Stable id, so "Not now" can hide exactly this suggestion for the session. */
   key: string;
-  kind: 'floor' | 'deadline' | 'close' | 'habit' | 'task' | 'checkin' | 'clear';
+  kind: 'floor' | 'deadline' | 'guard' | 'close' | 'habit' | 'task' | 'checkin' | 'clear';
   eyebrow: string;
   title: string;
   detail: string | null;
   cta: string | null;
   target: NextTarget;
+  /** Set by the server companion: its one-line voice and the honest reason this card is on top. */
+  voice?: string | null;
+  why?: string | null;
 }
 
 export interface NextInput {

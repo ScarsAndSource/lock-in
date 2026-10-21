@@ -206,6 +206,12 @@ class NotificationsService:
             payload["api"] = self._api_url
         return payload
 
+    async def deliver_text(self, user_id: UUID, msg: PushMessage) -> bool:
+        """Push one non-task message (the companion's moments) to the person's devices. True if one device got it.
+        The caller owns the daily budget; dead subscriptions are cleaned up exactly as for task nudges."""
+        live = list(await self._repo.list_subscriptions(user_id))
+        return bool(live) and await self._deliver(user_id, msg, live)
+
     async def _deliver(self, user_id: UUID, msg: PushMessage, live: list[PushSubscription]) -> bool:
         return await self._deliver_payload(user_id, self._payload(msg, user_id, None, self._clock()), live)
 

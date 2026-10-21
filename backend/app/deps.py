@@ -36,6 +36,7 @@ from app.services.media_service import MediaService
 from app.services.chat_service import ChatService
 from app.services.chat_threads_service import ChatThreadsService
 from app.services.checkins_service import CheckinsService
+from app.services.companion_service import CompanionService
 from app.services.goals_service import GoalsService
 from app.services.habits_service import HabitsService
 from app.services.insights_service import InsightsService
@@ -461,3 +462,14 @@ def get_ingest_service(
     clock: Clock = Depends(get_clock),
 ) -> IngestService:
     return IngestService(tokens, sleep, sleep_repo, screen, profiles, secret, clock)
+
+# ---- companion (Phase 2)
+def get_companion_service(
+    repo: SqlAlchemyCompanionRepository = Depends(get_companion_repository),
+    checkins: CheckinsService = Depends(get_checkins_service),
+    tasks: TasksService = Depends(get_tasks_service),
+    profiles: ProfileService = Depends(get_profile_service),
+    intentions: SqlAlchemyIntentionRepository = Depends(get_intention_repository),
+    clock: Clock = Depends(get_clock),
+) -> CompanionService:
+    return CompanionService(repo, checkins, tasks, profiles, intentions, clock)

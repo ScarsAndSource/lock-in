@@ -10,6 +10,20 @@ Every read goes through the same repositories/services the app uses, so RLS and 
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
+from app.exceptions import ValidationError
+from app.services.nudge_policy import reason as task_reason
+from app.services.next_action import HabitFacts, NextAction, NextInput, TaskFacts, pick_next
+from app.services.profile_service import ProfileService
+from app.services.rhythm import Rhythm, build_rhythm
+from app.services.tasks_service import TasksService
+from app.services.tone import resolve_tone
+from app.services.task_time import zone
+from app.repositories.goal_repository import IntentionRepository
+from app.services.checkins_service import CheckinsService
+from app.dates import Clock, utc_now
+
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -161,3 +175,78 @@ class CompanionPlanner:
         week = await self._study.summary(user_id, week_start(today), today)
         day = await self._study.summary(user_id, today, today)
         ctx.study_week_minutes, ctx.study_today_minutes = week.total_actual, day.total_actual
+
+
+
+LOOKBACK_DAYS = 60
+MAX_SKIPPED = 10
+MAX_REF_CHARS = 80
+EVENT_KINDS = frozenset({"app_open", "nba_shown", "nba_acted", "nba_skipped", "push_opened"})
+
+
+@dataclass(slots=True)
+class CompanionNow:
+    action: NextAction
+    rhythm: Rhythm
+    local_minute: int
+    tone: str
+    habits_done: int
+    habits_total: int
+    confirmed: bool
+    seed: int
+    today: date
+
+
+class CompanionService:
+    def __init__(
+        self, repo: CompanionRepository, checkins: CheckinsService, tasks: TasksService, profiles: ProfileService,
+        intentions: IntentionRepository, clock: Clock = utc_now,
+    ):
+        self._repo, self._checkins, self._tasks, self._profiles = repo, checkins, tasks, profiles
+        self._intentions, self._clock = intentions, clock
+
+    async def now(self, user_id: UUID, skipped: Iterable[str] = ()) -> CompanionNow:
+        now = self._clock()
+        profile = await self._profiles.get(user_id)
+        tz = zone(profile.timezone)
+        local = now.astimezone(tz)
+        today = local.date()
+
+        view = await self._checkins.get_view(user_id, today)
+        focus = await self._tasks.focus(user_id)
+        rhythm = build_rhythm(await self._repo.observations(user_id, tz, now, LOOKBACK_DAYS))
+        plans = await self._intentions.list(user_id, "urge", active_only=True)
+
+        habits = tuple(
+            HabitFacts(str(e.habit_id), e.habit_name, e.status, e.is_default, e.is_scheduled, e.floor_text)
+            for e in view.entries
+        )
+        tasks = tuple(
+            TaskFacts(str(v.task.id), v.task.title, v.task.importance, task_reason(v.task, now, tz)) for v in focus.now
+        )
+        tone = resolve_tone(profile.tone_preference, view.bounce.slip_streak)
+        local_minute = local.hour * 60 + local.minute
+        seed = today.toordinal()
+        keys = frozenset(str(k)[:MAX_REF_CHARS] for k in list(skipped)[:MAX_SKIPPED])
+
+        action = pick_next(NextInput(
+            habits=habits, tasks=tasks, confirmed=view.already_confirmed, bounce=view.bounce.active,
+            local_minute=local_minute, rhythm=rhythm, tone=tone, plan=plans[0].action if plans else None,
+            seed=seed, skipped=keys,
+        ))
+
+        scheduled = [h for h in habits if h.is_scheduled]
+        done = [
+            h for h in scheduled
+            if h.status is not None and h.status != "skipped" and (not h.is_default or view.already_confirmed)
+        ]
+        return CompanionNow(
+            action=action, rhythm=rhythm, local_minute=local_minute, tone=tone, habits_done=len(done),
+            habits_total=len(scheduled), confirmed=view.already_confirmed, seed=seed, today=today,
+        )
+
+    async def record_event(self, user_id: UUID, kind: str, ref: str | None) -> None:
+        if kind not in EVENT_KINDS:
+            raise ValidationError(f"kind must be one of: {', '.join(sorted(EVENT_KINDS))}.")
+        clean = (ref or "").strip()[:MAX_REF_CHARS] or None
+        await self._repo.add_event(user_id, kind, clean, self._clock())

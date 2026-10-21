@@ -119,10 +119,15 @@ export default {
           from: { opacity: "0", transform: "translateY(16px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        orbitPulse: {
+          "0%": { transform: "scale(1)", opacity: "0.45" },
+          "100%": { transform: "scale(3)", opacity: "0" },
+        },
       },
       animation: {
         fadeIn: "fadeIn 180ms ease-out",
         slideUp: "slideUp 220ms ease-out",
+        orbitPulse: "orbitPulse 2.6s ease-out infinite",
       },
     },
   },
