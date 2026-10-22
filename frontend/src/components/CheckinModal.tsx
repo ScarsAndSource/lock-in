@@ -7,7 +7,9 @@ import { Disclosure } from './Disclosure';
 import { SupportCard } from './SupportCard';
 import { BounceCard } from './BounceCard';
 import { MoodPicker } from './MoodPicker';
-import type { HabitStatus, CheckinOverride, SupportPayload } from '../types';
+import { CaptureBar } from './CaptureBar';
+import type { CheckinProposal, ScreenshotProposal } from '../api/capture';
+import type { HabitStatus, CheckinOverride, ScreenTimeSource, SupportPayload } from '../types';
 import { toTimeInput } from '../lib/dates';
 import { errorMessage, formatMinutes, habitStatusLabel, habitTierOptions, tierHint } from '../lib/format';
 
@@ -68,6 +70,12 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
   const [crisisDetected, setCrisisDetected] = useState(false);
   const [bannerSupport, setBannerSupport] = useState<SupportPayload | null>(null);
   const [savedSupport, setSavedSupport] = useState<SupportPayload | null>(null);
+  // Voice / typed / screenshot capture only PRE-FILLS the form above; the person still locks it in.
+  const [screenSource, setScreenSource] = useState<ScreenTimeSource>('manual');
+  const [screenCategories, setScreenCategories] = useState<Record<string, number> | null>(null);
+  const [captureNote, setCaptureNote] = useState<string | null>(null);
+  const [heard, setHeard] = useState<string | null>(null);
+  const [captureSupport, setCaptureSupport] = useState<SupportPayload | null>(null);
 
   useEffect(() => {
     if (!isOpen || !checkinView) return;
@@ -82,6 +90,11 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
     setWakeTime(toTimeInput(sleep?.time_woke, '06:45'));
     setSleepQuality(sleep?.self_rated_quality ?? 4);
     setScreenMinutes(screen?.total_minutes ?? 120);
+    setScreenSource('manual');
+    setScreenCategories(null);
+    setCaptureNote(null);
+    setHeard(null);
+    setCaptureSupport(null);
     setJournalText('');
     if (checkinView.already_confirmed) {
       getJournal(activeDate)
@@ -122,7 +135,10 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
 
   // A fresh open starts clean; closing drops the saved-with-support view.
   useEffect(() => {
-    if (!isOpen) setSavedSupport(null);
+    if (!isOpen) {
+      setSavedSupport(null);
+      setCaptureSupport(null);
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -132,6 +148,72 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
   const scheduledCount = entries.filter((e) => e.is_scheduled !== false).length;
   const editedHabits = Object.keys(habitOverrides).length;
   const anyEdit = sleepDirty || screenDirty || editedHabits > 0;
+
+  const applyProposal = (p: CheckinProposal) => {
+    setCaptureSupport(p.support ?? null);
+    if (p.support) {
+      // A crisis phrase: fixed resources, nothing parsed, nothing pre-filled.
+      setCaptureNote(null);
+      setHeard(null);
+      return;
+    }
+    if (p.empty) {
+      setCaptureNote(null);
+      setHeard(p.transcript);
+      showToast('Could not pick anything out of that. Try again, or fill it in below.');
+      return;
+    }
+    const known = new Set(entries.map((e) => e.habit_id));
+    const habits = p.habits.filter((h) => known.has(h.habit_id));
+    const filled: string[] = [];
+    if (habits.length > 0) {
+      setHabitOverrides((prev) => ({ ...prev, ...Object.fromEntries(habits.map((h) => [h.habit_id, h.status])) }));
+      filled.push(`${habits.length} habit${habits.length === 1 ? '' : 's'}`);
+    }
+    if (p.sleep && (p.sleep.time_to_bed || p.sleep.time_woke || p.sleep.self_rated_quality !== null)) {
+      if (p.sleep.time_to_bed) setBedtime(toTimeInput(p.sleep.time_to_bed, bedtime));
+      if (p.sleep.time_woke) setWakeTime(toTimeInput(p.sleep.time_woke, wakeTime));
+      if (p.sleep.self_rated_quality !== null) setSleepQuality(p.sleep.self_rated_quality);
+      setSleepDirty(true);
+      filled.push('sleep');
+    }
+    if (p.screen_time_minutes !== null) {
+      setScreenMinutes(Math.min(1440, Math.max(0, p.screen_time_minutes)));
+      setScreenSource('manual');
+      setScreenCategories(null);
+      setScreenDirty(true);
+      filled.push('screen time');
+    }
+    if (p.mood) {
+      setMood({ valence: p.mood.valence, energy: p.mood.energy });
+      setMoodDirty(true);
+      filled.push('mood');
+    }
+    if (p.journal) {
+      setJournalText((prev) => (prev.trim() ? `${prev.trim()}\n${p.journal}` : (p.journal as string)));
+      filled.push('a note');
+    }
+    setHeard(p.transcript);
+    setCaptureNote(
+      filled.length > 0
+        ? `Filled in ${filled.join(', ')}. Check it below, then lock it in.`
+        : 'I heard you, but none of it matched today’s habits, sleep or screen time.'
+    );
+  };
+
+  const applyScreenshot = (p: ScreenshotProposal) => {
+    setCaptureSupport(null);
+    setScreenMinutes(Math.min(1440, Math.max(0, p.total_minutes)));
+    setScreenSource('screenshot');
+    setScreenCategories(Object.keys(p.category_breakdown).length > 0 ? p.category_breakdown : null);
+    setScreenDirty(true);
+    setHeard(null);
+    setCaptureNote(
+      `Read ${formatMinutes(p.total_minutes)} from your screenshot${
+        p.confidence === 'high' ? '' : ` (${p.confidence} confidence, so check it is today’s total)`
+      }. Lock it in below if it is right.`
+    );
+  };
 
   const handleConfirm = async () => {
     setIsSubmitting(true);
@@ -151,7 +233,13 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
               self_rated_quality: sleepQuality,
             }
           : null,
-        screen_time: screenDirty ? { total_minutes: screenMinutes, source: 'manual' } : null,
+        screen_time: screenDirty
+          ? {
+              total_minutes: screenMinutes,
+              source: screenSource,
+              category_breakdown: screenSource === 'screenshot' ? screenCategories : null,
+            }
+          : null,
         // Only sent once both rows are tapped; null leaves any saved mood untouched.
         mood: moodDirty && mood.valence !== null && mood.energy !== null ? { valence: mood.valence, energy: mood.energy } : null,
         accept_sleep_default: !sleepDirty,
@@ -245,6 +333,15 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
       ) : (
         <div className="space-y-3">
           <BounceCard bounce={checkinView.bounce} />
+          <CaptureBar onProposal={applyProposal} onScreenshot={applyScreenshot} />
+          {captureSupport && <SupportCard support={captureSupport} />}
+          {captureNote && (
+            <div className="p-3 bg-surface-container rounded-lg space-y-1">
+              <p className="font-small text-small text-ink">{captureNote}</p>
+              {heard && <p className="font-caption text-caption text-muted-text">Heard: “{heard}”</p>}
+            </div>
+          )}
+          {!captureNote && heard && <p className="font-caption text-caption text-muted-text">Heard: “{heard}”</p>}
           <p className="font-small text-small text-muted-text">Change only what was different today.</p>
 
           <Disclosure title="Habits" summary={habitSummary}>
@@ -341,11 +438,13 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
               <input
                 type="range"
                 min="0"
-                max="600"
+                max={Math.max(600, screenMinutes)}
                 step="15"
                 value={screenMinutes}
                 onChange={(e) => {
                   setScreenMinutes(parseInt(e.target.value, 10));
+                  setScreenSource('manual'); // a hand edit replaces a screenshot reading and its app breakdown
+                  setScreenCategories(null);
                   setScreenDirty(true);
                 }}
                 className="w-full accent-ink"

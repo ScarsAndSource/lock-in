@@ -4,6 +4,7 @@ import { Sheet } from './Sheet';
 import { Disclosure } from './Disclosure';
 import { NotificationSettings } from './NotificationSettings';
 import { CalendarImport } from './CalendarImport';
+import { AutomationsSettings } from './AutomationsSettings';
 import {
   getProfile,
   patchProfile,
@@ -167,6 +168,10 @@ export const SettingsSheet: React.FC = () => {
 
         <Disclosure title="Calendar and exams">
           <CalendarImport />
+        </Disclosure>
+
+        <Disclosure title="Automations" summary="Sleep, hands-free">
+          <AutomationsSettings />
         </Disclosure>
 
         <Disclosure title="If-then plans" summary={`${intentions.length} active`}>

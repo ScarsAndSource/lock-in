@@ -80,7 +80,10 @@ async function send(path: string, options: RequestInit, token: string | null): P
   const headers = new Headers(options.headers || {});
   const method = (options.method || 'GET').toUpperCase();
 
-  if (method !== 'GET' && method !== 'HEAD' && !headers.has('Content-Type')) {
+  // A FormData body (voice / screenshot upload) must NOT get a JSON Content-Type: the browser has to set the
+  // multipart boundary itself.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  if (method !== 'GET' && method !== 'HEAD' && !isForm && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   headers.set(

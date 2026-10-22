@@ -4,6 +4,7 @@ import { getChatThreads, getThreadDetail, sendMessage } from '../api/chat';
 import { fetchSupport } from '../api/support';
 import { SupportCard } from '../components/SupportCard';
 import { ActionCards } from '../components/ActionCards';
+import { VoiceButton } from '../components/VoiceButton';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
@@ -189,6 +190,10 @@ export const ChatView: React.FC = () => {
       </div>
 
       <form onSubmit={handleSend} className="pt-2 shrink-0 flex items-center gap-2">
+        <VoiceButton
+          disabled={isSending}
+          onTranscript={(t) => setInputText((prev) => `${prev.trim() ? `${prev.trim()} ` : ''}${t}`)}
+        />
         <input
           type="text"
           value={inputText}

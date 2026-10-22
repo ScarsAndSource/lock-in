@@ -2,7 +2,7 @@ export type Domain = 'habit' | 'screen_time' | 'urge' | 'study' | 'sleep';
 
 export type HabitStatus = 'done' | 'skipped' | 'partial' | 'floor' | 'stretch';
 
-export type ScreenTimeSource = 'manual' | 'extension';
+export type ScreenTimeSource = 'manual' | 'extension' | 'screenshot' | 'automation';
 
 export type UrgeOutcome = 'resisted' | 'relapsed';
 

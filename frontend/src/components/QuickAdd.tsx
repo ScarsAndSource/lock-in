@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { captureTasks } from '../api/tasks';
 import { SupportCard } from './SupportCard';
+import { VoiceButton } from './VoiceButton';
 import type { SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
@@ -71,6 +72,11 @@ export const QuickAdd: React.FC<QuickAddProps> = ({ onAdded }) => {
         className="w-full bg-surface-container-low border border-line rounded-lg px-3 py-2 font-small text-ink resize-none"
       />
       <div className="flex gap-2">
+        <VoiceButton
+          className="w-10 h-10"
+          disabled={sending}
+          onTranscript={(t) => setText((prev) => `${prev.trim() ? `${prev.trim()} ` : ''}${t}`.slice(0, 1000))}
+        />
         <button
           type="button"
           disabled={sending || !text.trim()}
