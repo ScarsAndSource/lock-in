@@ -3,6 +3,7 @@ import { getLatestRetro, updateRetroTone, completeRetro, generateRetro } from '.
 import { RetroDetail, WeekMode } from '../types';
 import { useApp } from '../context/AppContext';
 import { addDaysISO } from '../lib/dates';
+import { IdentityVote } from './growth/IdentityVote';
 import { errorMessage, formatMinutes, formatPct } from '../lib/format';
 
 interface Chip {
@@ -225,6 +226,8 @@ export const WeeklyRetro: React.FC = () => {
       </div>
 
       <p className="font-small-medium text-ink leading-relaxed">{retro.narrative}</p>
+
+      <IdentityVote weekStart={retro.week_start} />
 
       {/* Concrete next step */}
       <div className="p-3 bg-surface-container-low rounded-lg border border-surface-container">

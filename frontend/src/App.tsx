@@ -16,6 +16,7 @@ const MirrorView = lazy(() => import('./views/MirrorView').then((m) => ({ defaul
 const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })));
 const DomainSheet = lazy(() => import('./components/DomainSheet').then((m) => ({ default: m.DomainSheet })));
 const TriageSheet = lazy(() => import('./components/TriageSheet').then((m) => ({ default: m.TriageSheet })));
+const FutureSelfPlayer = lazy(() => import('./components/growth/FutureSelfPlayer').then((m) => ({ default: m.FutureSelfPlayer })));
 
 const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror' } as const;
 
@@ -36,10 +37,11 @@ export const AppContent: React.FC = () => {
   } = useApp();
 
   const [triageOpen, setTriageOpen] = useState(false);
+  const [futureId, setFutureId] = useState<string | null>(null);
 
   // A notification body tap lands on /?a=<where>. Every push the companion sends names one of these, and on iPhone
   // (no lock-screen buttons) this is how the tap finishes the job. Must run before the signed-out early return.
-  useDeepLink((link) => {
+  useDeepLink((link, params) => {
     switch (link) {
       case 'tasks':
         setActiveTab('now');
@@ -59,6 +61,9 @@ export const AppContent: React.FC = () => {
         break;
       case 'insight':
         setActiveTab('mirror');
+        break;
+      case 'future':
+        if (params?.id) setFutureId(params.id);
         break;
       default: // habit, focus, comeback: the Now tab shows the next thing itself
         setActiveTab('now');
@@ -92,6 +97,7 @@ export const AppContent: React.FC = () => {
         {domainSheet && <DomainSheet />}
         {settingsOpen && <SettingsSheet />}
         {triageOpen && <TriageSheet open onClose={() => setTriageOpen(false)} />}
+        {futureId && <FutureSelfPlayer id={futureId} onClose={() => setFutureId(null)} />}
       </Suspense>
 
       <Toast />

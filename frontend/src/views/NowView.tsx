@@ -5,6 +5,7 @@ import { useCompanion } from '../hooks/useCompanion';
 import { DEMO_RHYTHM } from '../api/companion';
 import { DayOrbit } from '../components/DayOrbit';
 import { NextCard } from '../components/NextCard';
+import { GentlePrompt } from '../components/growth/GentlePrompt';
 import { HabitChecklist } from '../components/HabitChecklist';
 import { TaskList } from '../components/TaskList';
 import { QuickAdd } from '../components/QuickAdd';
@@ -52,6 +53,8 @@ export const NowView: React.FC = () => {
       />
 
       <NextCard companion={companion} focus={focus} skipped={skipped} onSkip={onSkip} reloadAll={reloadAll} />
+
+      <GentlePrompt />
 
       {(hasHabits || hasTasks || checkinView) && (
         <section className="w-full bg-surface rounded-xl px-4 py-3 border border-line [&>*+*]:border-t [&>*+*]:border-line [&>*+*]:mt-3 [&>*+*]:pt-3">

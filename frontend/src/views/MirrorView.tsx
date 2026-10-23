@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { DomainKey } from '../context/AppContext';
 import { WeeklyRetro } from '../components/WeeklyRetro';
@@ -8,6 +8,9 @@ import { PatternsFeed } from '../components/PatternsFeed';
 import { InsightsFeed } from '../components/InsightsFeed';
 import { getActiveMission } from '../api/profile';
 import type { MissionDetail } from '../types';
+import { MIRROR_SECTION_KEY } from '../api/growth';
+
+const GrowthPanel = lazy(() => import('../components/growth/GrowthPanel').then((m) => ({ default: m.GrowthPanel })));
 
 const DOMAIN_TILES: { key: DomainKey; label: string; dot: string }[] = [
   { key: 'habits', label: 'Habits', dot: 'bg-domain-habits-fill' },
@@ -20,7 +23,7 @@ const DOMAIN_TILES: { key: DomainKey; label: string; dot: string }[] = [
 
 type Lens = 'insights' | 'patterns';
 
-export const MirrorView: React.FC = () => {
+const MirrorOverview: React.FC = () => {
   const { openDomain, demoMode, dataEpoch } = useApp();
   const [mission, setMission] = useState<MissionDetail | null>(null);
   const [lens, setLens] = useState<Lens>('insights');
@@ -106,6 +109,53 @@ export const MirrorView: React.FC = () => {
         </div>
         {lens === 'insights' ? <InsightsFeed /> : <PatternsFeed />}
       </section>
+    </div>
+  );
+};
+
+type Section = 'overview' | 'growth';
+
+/** Mirror has two sub-tabs: the existing review screen untouched, and Growth for the reflective extras. */
+export const MirrorView: React.FC = () => {
+  const [section, setSection] = useState<Section>(() => {
+    try {
+      return sessionStorage.getItem(MIRROR_SECTION_KEY) === 'growth' ? 'growth' : 'overview';
+    } catch {
+      return 'overview';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(MIRROR_SECTION_KEY); // the hand-off from the Now prompt is one-shot
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  return (
+    <div className="flex flex-col w-full max-w-md mx-auto space-y-4">
+      <div className="flex items-center bg-surface-container p-0.5 rounded-lg">
+        {(['overview', 'growth'] as Section[]).map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSection(s)}
+            className={`flex-1 h-9 rounded font-caption text-caption capitalize transition-colors ${
+              section === s ? 'bg-ink text-ground-chalk font-semibold' : 'text-ink'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      {section === 'overview' ? (
+        <MirrorOverview />
+      ) : (
+        <Suspense fallback={<p className="py-10 text-center font-small text-muted-text">Loading…</p>}>
+          <GrowthPanel />
+        </Suspense>
+      )}
     </div>
   );
 };
