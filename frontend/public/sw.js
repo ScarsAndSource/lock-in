@@ -81,6 +81,7 @@ self.addEventListener('fetch', (event) => {
 // A push may carry up to two action buttons plus ONE signed, single-use, short-lived `token`. A button tap POSTs the
 // token straight to the API (no session needed), so the loop closes from the lock screen without opening the app.
 // iOS web push shows no buttons: there the body tap deep-links into the app (/?a=checkin ...), which finishes the job.
+// A swipe-away ("notificationclose") is reported too, so the anti-nag backoff learns "ignored" at once, not hours later.
 const ICON = '/favicon.svg';
 // Buttons that finish by opening the app on the thing itself (morning "Start"): the tap is recorded first, then we go.
 const OPEN_AFTER = new Set(['start']);
@@ -158,6 +159,14 @@ async function runButton(d, action) {
   }
   return openApp(d.url || '/');
 }
+
+// Fires only when the person dismisses the notification. It does NOT fire when we close it ourselves (a tap, a button,
+// the flash message), so a tap is never also counted as a swipe. Best effort: offline or expired just means "unknown".
+self.addEventListener('notificationclose', (event) => {
+  const d = (event.notification && event.notification.data) || {};
+  if (!d.token) return;
+  event.waitUntil(postAction(d, 'dismiss').catch(() => {}));
+});
 
 self.addEventListener('notificationclick', (event) => {
   const n = event.notification;

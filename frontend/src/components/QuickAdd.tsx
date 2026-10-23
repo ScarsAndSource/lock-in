@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { captureTasks } from '../api/tasks';
+import { SchedulePhoto } from './SchedulePhoto';
 import { SupportCard } from './SupportCard';
 import { VoiceButton } from './VoiceButton';
 import type { SupportPayload } from '../types';
@@ -46,14 +47,17 @@ export const QuickAdd: React.FC<QuickAddProps> = ({ onAdded }) => {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="w-full h-12 px-4 bg-surface border border-dashed border-outline-variant rounded-xl flex items-center gap-2 text-muted-text hover:text-ink hover:border-outline transition-colors"
-      >
-        <span className="material-symbols-outlined text-[20px]">add</span>
-        <span className="font-small text-small">Add a task or reminder</span>
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex-1 min-w-0 h-12 px-4 bg-surface border border-dashed border-outline-variant rounded-xl flex items-center gap-2 text-muted-text hover:text-ink hover:border-outline transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">add</span>
+          <span className="font-small text-small">Add a task or reminder</span>
+        </button>
+        <SchedulePhoto onAdded={onAdded} className="w-12 h-12 shrink-0 rounded-xl bg-surface border border-dashed border-outline-variant flex items-center justify-center text-muted-text hover:text-ink hover:border-outline disabled:opacity-40" />
+      </div>
     );
   }
 
@@ -77,6 +81,7 @@ export const QuickAdd: React.FC<QuickAddProps> = ({ onAdded }) => {
           disabled={sending}
           onTranscript={(t) => setText((prev) => `${prev.trim() ? `${prev.trim()} ` : ''}${t}`.slice(0, 1000))}
         />
+        <SchedulePhoto onAdded={onAdded} disabled={sending} />
         <button
           type="button"
           disabled={sending || !text.trim()}

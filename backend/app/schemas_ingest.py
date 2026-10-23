@@ -7,8 +7,12 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+IngestKind = Literal["sleep_start", "sleep_end", "screen_time", "habit_done"]
+
+
 class IngestTokenCreate(BaseModel):
     label: Annotated[str, Field(min_length=1, max_length=40)]
+    habit_id: UUID | None = None      # set: a key that can only mark THIS habit done (kind "habit_done")
 
 
 class IngestTokenOut(BaseModel):
@@ -17,14 +21,15 @@ class IngestTokenOut(BaseModel):
     created_at: datetime
     last_used_at: datetime | None
     revoked_at: datetime | None
+    habit_id: UUID | None = None
 
 
 class IngestTokenCreated(IngestTokenOut):
-    token: str   # shown once. Put it in the automation's Authorization header: "Bearer <token>"
+    token: str   # shown once. Either an Authorization "Bearer <token>" header, or inside the URL (/ingest/u/<token>/<kind>)
 
 
 class IngestEvent(BaseModel):
-    kind: Literal["sleep_start", "sleep_end", "screen_time"]
+    kind: IngestKind
     at: datetime | None = None                       # when it happened (with offset); default: now
     minutes: Annotated[int | None, Field(ge=0, le=1440)] = None
     date: Date | None = None                         # screen_time only: which day the total is for

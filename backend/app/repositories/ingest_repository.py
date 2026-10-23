@@ -21,7 +21,7 @@ class IngestTokenRepository(Protocol):
 
 def _to_domain(r: IngestTokenORM) -> IngestToken:
     return IngestToken(id=r.id, user_id=r.user_id, label=r.label, created_at=r.created_at,
-                       last_used_at=r.last_used_at, revoked_at=r.revoked_at)
+                       last_used_at=r.last_used_at, revoked_at=r.revoked_at, habit_id=r.habit_id)
 
 
 class SqlAlchemyIngestTokenRepository:
@@ -31,6 +31,7 @@ class SqlAlchemyIngestTokenRepository:
     async def create(self, token: IngestToken) -> IngestToken:
         self._session.add(IngestTokenORM(
             id=token.id, user_id=token.user_id, label=token.label, created_at=token.created_at,
+            habit_id=token.habit_id,
         ))
         await self._session.flush()
         return token

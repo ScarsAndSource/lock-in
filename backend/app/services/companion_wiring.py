@@ -93,7 +93,7 @@ def build_stack(
     ns.pulse = DailyPulse(ledger, checkin_repo, insights)
     ns.ingest = IngestService(
         SqlAlchemyIngestTokenRepository(session), SleepService(sleep_repo, clock), sleep_repo,
-        ScreenTimeService(screen_repo, clock), profiles, secret, clock,
+        ScreenTimeService(screen_repo, clock), profiles, secret, clock, habit_repo=habit_repo,
     )
     ns.actions = ActionsService(
         ledger=ledger, tasks=tasks, checkins=checkins, habits=HabitsService(habit_repo, clock), profiles=profiles,

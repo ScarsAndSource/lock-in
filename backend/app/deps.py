@@ -464,8 +464,9 @@ def get_ingest_service(
     profiles: ProfileService = Depends(get_profile_service),
     secret: bytes = Depends(get_action_secret),
     clock: Clock = Depends(get_clock),
+    habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
 ) -> IngestService:
-    return IngestService(tokens, sleep, sleep_repo, screen, profiles, secret, clock)
+    return IngestService(tokens, sleep, sleep_repo, screen, profiles, secret, clock, habit_repo=habit_repo)
 
 # ---- companion (Phase 2)
 def get_calendar_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyCalendarRepository:

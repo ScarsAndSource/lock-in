@@ -371,6 +371,7 @@ class CompanionPushORM(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     acted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class IngestTokenORM(Base):
@@ -382,6 +383,9 @@ class IngestTokenORM(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    habit_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("habit_definitions.id", ondelete="CASCADE"), nullable=True,
+    )
 
 
 class PushSubscriptionORM(Base):

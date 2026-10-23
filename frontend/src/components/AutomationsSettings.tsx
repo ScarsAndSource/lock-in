@@ -4,6 +4,7 @@ import { API_BASE } from '../api/client';
 import {
   MAX_ACTIVE_INGEST_TOKENS,
   createIngestToken,
+  ingestUrl,
   listIngestTokens,
   revokeIngestToken,
   type IngestToken,
@@ -11,7 +12,8 @@ import {
 } from '../api/capture';
 import { errorMessage } from '../lib/format';
 
-type Platform = 'ios' | 'android';
+type Platform = 'android' | 'ios';
+type Mode = 'sleep' | 'habit';
 
 const input = 'w-full bg-surface-container-low border border-line rounded-lg px-3 py-2 font-small text-ink';
 const primaryBtn = 'w-full h-10 bg-ink text-ground-chalk rounded-lg font-caption text-caption font-semibold disabled:opacity-40';
@@ -50,22 +52,29 @@ const CopyRow: React.FC<{ label: string; value: string; onCopy: (value: string, 
 );
 
 /**
- * Passive capture setup. One token per phone automation (write-only: it can add sleep and screen-time events and
- * nothing else). The token is shown ONCE, right after it is made; the server never stores or returns it again.
- * Mounted inside Settings.
+ * Phone automations. One key per automation. Two kinds:
+ *   sleep key  - can add "went to bed", "woke up" (and an advanced screen-time total). Nothing else.
+ *   habit key  - tied to ONE habit; can only mark that habit done for today (arrive at the gym, a Focus mode starts...).
+ * Both are write-only: a key cannot read anything back. The key is shown ONCE, right after it is made, as ready-to-paste
+ * URLs (the key rides in the address, so no headers and no JSON are needed). The server never shows it again.
  */
 export const AutomationsSettings: React.FC = () => {
-  const { demoMode, showToast } = useApp();
+  const { demoMode, showToast, checkinView } = useApp();
   const [tokens, setTokens] = useState<IngestToken[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<Mode>('sleep');
+  const [habitId, setHabitId] = useState('');
   const [label, setLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [fresh, setFresh] = useState<IngestTokenCreated | null>(null);
-  const [platform, setPlatform] = useState<Platform>('ios');
+  const [platform, setPlatform] = useState<Platform>('android');
 
-  const endpoint = `${API_BASE || window.location.origin}/ingest/event`;
+  const habits = checkinView?.entries ?? [];
+  const habitName = (id: string | null | undefined) => habits.find((h) => h.habit_id === id)?.habit_name ?? 'a habit';
+  const base = (API_BASE || window.location.origin).replace(/\/$/, '');
   const active = tokens.filter((t) => !t.revoked_at);
   const atCap = active.length >= MAX_ACTIVE_INGEST_TOKENS;
+  const chosenHabit = habits.find((h) => h.habit_id === habitId);
 
   const load = useCallback(async () => {
     if (demoMode) {
@@ -94,13 +103,15 @@ export const AutomationsSettings: React.FC = () => {
     }
   };
 
+  const name = (mode === 'habit' ? label.trim() || (chosenHabit ? `${chosenHabit.habit_name} auto` : '') : label.trim()).slice(0, 40);
+  const canCreate = !creating && !atCap && name.length > 0 && (mode === 'sleep' || habitId !== '');
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    const name = label.trim();
-    if (!name || creating) return;
+    if (!canCreate) return;
     setCreating(true);
     try {
-      const made = await createIngestToken(name);
+      const made = await createIngestToken(name, mode === 'habit' ? habitId : undefined);
       setFresh(made);
       setLabel('');
       await load();
@@ -127,44 +138,78 @@ export const AutomationsSettings: React.FC = () => {
     return <p className="pt-2 font-small text-small text-muted-text">Automations need the live backend. Turn off demo data to set them up.</p>;
   }
 
-  const bearer = `Bearer ${fresh ? fresh.token : '<your token>'}`;
-  const bodies = [
-    { what: 'Went to bed', json: '{"kind": "sleep_start"}' },
-    { what: 'Woke up', json: '{"kind": "sleep_end"}' },
-    { what: 'Screen time total (advanced)', json: '{"kind": "screen_time", "minutes": 180}' },
-  ];
+  const freshIsHabit = Boolean(fresh?.habit_id);
 
   return (
     <div className="space-y-4 pt-2">
       <p className="font-caption text-caption text-muted-text leading-relaxed">
-        Let your phone log sleep for you. An automation on your phone calls Lock’in when you go to bed and when you wake up.
-        Each automation gets its own key that can only add sleep and screen-time events. It cannot read anything back.
+        Let your phone do the logging. A sleep automation calls Lock’in when you go to bed and wake up. A habit automation
+        marks one habit done when something happens, like arriving at the gym. Each key can only write, never read anything
+        back, and you can revoke it any time.
       </p>
 
       {fresh && (
-        <div role="alert" className="p-3 rounded-xl border border-ink bg-surface-container space-y-2">
-          <p className="font-small-medium text-small-medium text-ink">Key for “{fresh.label}”</p>
-          <p className="font-caption text-caption text-muted-text">
-            Copy it now. It is shown once and cannot be recovered. If you lose it, revoke it and make a new one.
+        <div role="alert" className="p-3 rounded-xl border border-ink bg-surface-container space-y-3">
+          <p className="font-small-medium text-small-medium text-ink">
+            {freshIsHabit ? `Habit automation “${fresh.label}”` : `Sleep automation “${fresh.label}”`}
           </p>
-          <CopyRow label="Key" value={fresh.token} onCopy={(v, w) => void copy(v, w)} />
+          <p className="font-caption text-caption text-muted-text">
+            Copy the link{freshIsHabit ? '' : 's'} now. {freshIsHabit ? 'It contains' : 'They contain'} your key, so treat{' '}
+            {freshIsHabit ? 'it' : 'them'} like a password. Shown once; if you lose {freshIsHabit ? 'it' : 'them'}, revoke this
+            automation and make a new one.
+          </p>
+          {freshIsHabit ? (
+            <CopyRow label="Link: mark habit done" value={ingestUrl(fresh.token, 'habit_done')} onCopy={(v, w) => void copy(v, w)} />
+          ) : (
+            <>
+              <CopyRow label="Link: went to bed" value={ingestUrl(fresh.token, 'sleep_start')} onCopy={(v, w) => void copy(v, w)} />
+              <CopyRow label="Link: woke up" value={ingestUrl(fresh.token, 'sleep_end')} onCopy={(v, w) => void copy(v, w)} />
+            </>
+          )}
           <button type="button" onClick={() => setFresh(null)} className={primaryBtn}>
-            I’ve saved it
+            I’ve saved {freshIsHabit ? 'it' : 'them'}
           </button>
         </div>
       )}
 
       <form onSubmit={create} className="space-y-2">
+        <div className="flex gap-2">
+          {(['sleep', 'habit'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`flex-1 h-9 rounded-lg font-caption text-caption font-semibold border ${
+                mode === m ? 'bg-ink text-ground-chalk border-ink' : 'bg-surface text-ink border-line'
+              }`}
+            >
+              {m === 'sleep' ? 'Sleep' : 'Habit done'}
+            </button>
+          ))}
+        </div>
+        {mode === 'habit' &&
+          (habits.length === 0 ? (
+            <p className="font-caption text-caption text-muted-text">Add a habit first, then come back to automate it.</p>
+          ) : (
+            <select value={habitId} onChange={(e) => setHabitId(e.target.value)} className={input} aria-label="Which habit">
+              <option value="">Pick the habit this marks done</option>
+              {habits.map((h) => (
+                <option key={h.habit_id} value={h.habit_id}>
+                  {h.habit_name}
+                </option>
+              ))}
+            </select>
+          ))}
         <input
           type="text"
           value={label}
           maxLength={40}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Name it, e.g. iPhone wake-up"
+          placeholder={mode === 'sleep' ? 'Name it, e.g. Phone sleep' : chosenHabit ? `Name it (default: ${chosenHabit.habit_name} auto)` : 'Name it (optional)'}
           className={input}
         />
-        <button type="submit" disabled={creating || !label.trim() || atCap} className={primaryBtn}>
-          {creating ? 'Creating…' : atCap ? `Limit of ${MAX_ACTIVE_INGEST_TOKENS} reached. Revoke one first` : 'Create automation key'}
+        <button type="submit" disabled={!canCreate} className={primaryBtn}>
+          {creating ? 'Creating…' : atCap ? `Limit of ${MAX_ACTIVE_INGEST_TOKENS} reached. Revoke one first` : 'Create automation'}
         </button>
       </form>
 
@@ -181,7 +226,10 @@ export const AutomationsSettings: React.FC = () => {
           <div key={t.id} className="p-3 bg-surface-container-low rounded-xl border border-surface-container flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <span className="font-small-medium text-ink block truncate">{t.label}</span>
-              <span className="font-caption text-caption text-muted-text">{t.revoked_at ? 'revoked' : ago(t.last_used_at)}</span>
+              <span className="font-caption text-caption text-muted-text">
+                {t.habit_id ? `Marks ${habitName(t.habit_id)} done · ` : 'Sleep · '}
+                {t.revoked_at ? 'revoked' : ago(t.last_used_at)}
+              </span>
             </div>
             {!t.revoked_at && (
               <button
@@ -199,7 +247,7 @@ export const AutomationsSettings: React.FC = () => {
       <div className="space-y-3 pt-1 border-t border-surface-container">
         <span className="font-small-medium text-small-medium text-ink block pt-3">Setup guide</span>
         <div className="flex gap-2">
-          {(['ios', 'android'] as const).map((p) => (
+          {(['android', 'ios'] as const).map((p) => (
             <button
               key={p}
               type="button"
@@ -208,50 +256,60 @@ export const AutomationsSettings: React.FC = () => {
                 platform === p ? 'bg-ink text-ground-chalk border-ink' : 'bg-surface text-ink border-line'
               }`}
             >
-              {p === 'ios' ? 'iPhone (Shortcuts)' : 'Android (Tasker / MacroDroid)'}
+              {p === 'android' ? 'Android' : 'iPhone (Shortcuts)'}
             </button>
           ))}
         </div>
 
-        {platform === 'ios' ? (
+        {platform === 'android' ? (
           <ol className="list-decimal pl-5 space-y-1.5 font-small text-small text-ink leading-relaxed">
-            <li>Open Shortcuts, go to Automation, and make a new personal automation.</li>
+            <li>Install an automation app that can send a web request: MacroDroid, Tasker, or HTTP Shortcuts.</li>
             <li>
-              Pick the Sleep trigger: “Bedtime starts” for going to bed, “Wake Up” for waking (names shift a little between iOS
-              versions). An Alarm trigger set to “Is Stopped” also works for waking.
+              Make a macro. Pick the trigger: for a habit, arriving at a place, a Focus or Do Not Disturb mode starting, or the
+              charger connecting; for sleep, your alarm being dismissed, plus a bedtime trigger of your choice.
             </li>
-            <li>Add the action “Get Contents of URL”, open Show More, and set the method to POST.</li>
-            <li>Add two headers: Authorization and Content-Type, with the values below.</li>
-            <li>Set Request Body to JSON, add a Text field named kind, and give it the value for that automation.</li>
-            <li>Turn off “Ask Before Running”, so it runs without a prompt.</li>
+            <li>Add the action “HTTP Request” (MacroDroid), Net → HTTP Request (Tasker), or a new shortcut (HTTP Shortcuts).</li>
+            <li>Paste the link you copied above. Method GET or POST both work. No headers and no body are needed.</li>
+            <li>Run it once by hand. “Used just now” in the list above means it reached Lock’in.</li>
           </ol>
         ) : (
           <ol className="list-decimal pl-5 space-y-1.5 font-small text-small text-ink leading-relaxed">
-            <li>Make a macro or profile. For waking: alarm dismissed. For bed: your own trigger, such as a bedtime schedule or the phone charging after your usual hour.</li>
-            <li>Add the action “HTTP Request” (MacroDroid) or Net → HTTP Request (Tasker).</li>
-            <li>Method POST, with the URL below.</li>
-            <li>Add the Authorization and Content-Type headers below.</li>
-            <li>Set the body to the JSON for that automation, content type application/json.</li>
+            <li>Open Shortcuts, go to Automation, and make a new personal automation.</li>
+            <li>
+              Pick the trigger: for a habit, Arrive at a place or a Focus turning on; for sleep, the Sleep trigger (“Bedtime
+              starts” / “Wake Up”; the names shift between iOS versions), or an Alarm that “Is Stopped”.
+            </li>
+            <li>Add the action “Get Contents of URL” and paste the link you copied above. Leave the method as it is.</li>
+            <li>Turn off “Ask Before Running”, so it runs without a prompt.</li>
           </ol>
         )}
 
-        <CopyRow label="URL" value={endpoint} onCopy={(v, w) => void copy(v, w)} />
-        <CopyRow label="Authorization header" value={bearer} onCopy={(v, w) => void copy(v, w)} />
-        <CopyRow label="Content-Type header" value="application/json" onCopy={(v, w) => void copy(v, w)} />
-        {bodies.map((b) => (
-          <CopyRow key={b.what} label={`Body: ${b.what}`} value={b.json} onCopy={(v, w) => void copy(v, w)} />
-        ))}
-
         <ul className="list-disc pl-5 space-y-1 font-caption text-caption text-muted-text leading-relaxed">
-          <li>The time defaults to “now”. Events older than 36 hours are refused.</li>
-          <li>A bedtime logged after 3 pm counts toward the night that ends tomorrow morning.</li>
-          <li>Run the automation once by hand. “Used just now” above confirms it reached Lock’in.</li>
+          <li>Sleep: the time defaults to “now”, events older than 36 hours are refused, and a bedtime logged after 3 pm counts toward the night that ends tomorrow morning.</li>
+          <li>Habit: it never overwrites something you already logged today, and it only marks “done”. Untick it in the habit list if it fired by mistake.</li>
           <li>
-            Shortcuts has no action that reads your Screen Time total, and most Android automation apps cannot read Digital
-            Wellbeing either. For screen time, the Screenshot button in the check-in is the reliable route; treat the
-            screen_time event as advanced.
+            Screen time can’t be read by phone automations. The Screenshot button in the check-in is the reliable route.
           </li>
         </ul>
+
+        <details className="rounded-xl border border-surface-container p-3">
+          <summary className="font-caption text-caption font-semibold text-ink cursor-pointer">
+            Advanced: send the key in a header instead of the link
+          </summary>
+          <div className="space-y-3 pt-3">
+            <p className="font-caption text-caption text-muted-text leading-relaxed">
+              For tools that prefer a header and a JSON body. The key is the same one; use the value you copied when you made it
+              (Bearer plus the key). POST only.
+            </p>
+            <CopyRow label="URL" value={`${base}/ingest/event`} onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Authorization header" value="Bearer <your key>" onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Content-Type header" value="application/json" onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Body: went to bed" value='{"kind": "sleep_start"}' onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Body: woke up" value='{"kind": "sleep_end"}' onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Body: habit done (habit key only)" value='{"kind": "habit_done"}' onCopy={(v, w) => void copy(v, w)} />
+            <CopyRow label="Body: screen time total" value='{"kind": "screen_time", "minutes": 180}' onCopy={(v, w) => void copy(v, w)} />
+          </div>
+        </details>
       </div>
     </div>
   );

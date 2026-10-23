@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from sqlalchemy import case, delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CalendarEventORM
@@ -45,6 +46,9 @@ class SourceSummary:
 class CalendarRepository(Protocol):
     async def replace_future(
         self, user_id: UUID, source: str, from_dt: datetime, events: Sequence[ParsedEvent], now: datetime,
+    ) -> int: ...
+    async def add_events(
+        self, user_id: UUID, source: str, events: Sequence[ParsedEvent], now: datetime,
     ) -> int: ...
     async def count_other_sources(self, user_id: UUID, source: str) -> int: ...
     async def list_range(
@@ -94,6 +98,28 @@ class SqlAlchemyCalendarRepository:
         self._session.add_all(rows)
         await self._session.flush()
         return len(rows)
+
+    async def add_events(
+        self, user_id: UUID, source: str, events: Sequence[ParsedEvent], now: datetime,
+    ) -> int:
+        """ADD to a source without touching what it already holds (a photo adds; a re-imported file replaces).
+        The same (uid, start) is skipped, so confirming the same picture twice never duplicates. Returns rows added."""
+        if not events:
+            return 0
+        rows = [
+            {
+                "id": uuid4(), "user_id": user_id, "source": source, "uid": e.uid, "title": e.title,
+                "starts_at": e.starts_at, "ends_at": e.ends_at, "all_day": e.all_day, "kind": e.kind,
+                "kind_locked": False, "imported_at": now,
+            }
+            for e in events
+        ]
+        stmt = (
+            pg_insert(CalendarEventORM).values(rows)
+            .on_conflict_do_nothing(constraint="calendar_events_source_uid_start")
+            .returning(CalendarEventORM.id)
+        )
+        return len((await self._session.execute(stmt)).scalars().all())
 
     async def count_other_sources(self, user_id: UUID, source: str) -> int:
         o = CalendarEventORM

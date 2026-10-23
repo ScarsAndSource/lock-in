@@ -8,6 +8,8 @@ Frozen contract for the merge step:
 """
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from uuid import UUID
@@ -15,13 +17,15 @@ from uuid import UUID
 from app.dates import Clock, utc_now
 from app.exceptions import NotFoundError, ValidationError
 from app.repositories.calendar_repository import CalendarEvent, CalendarRepository, SourceSummary
-from app.services.calendar_import import KINDS, MAX_ICS_CHARS, NotCalendarError, parse_ics
+from app.services.calendar_import import KINDS, MAX_ICS_CHARS, NotCalendarError, ParsedEvent, parse_ics
 from app.services.exam_awareness import ExamEvent
 from app.services.profile_service import ProfileService
 from app.services.task_time import zone
 
 MAX_EVENTS_PER_USER = 5000
 MAX_SOURCES = 5
+PHOTO_SOURCE = "photo"
+MAX_PHOTO_EVENTS = 60
 EXAM_LOOKAHEAD_DAYS = 60
 DEFAULT_RANGE_DAYS = 60
 MAX_LIST = 500
@@ -90,6 +94,48 @@ class CalendarService:
             skipped=parsed.skipped,
             warnings=parsed.warnings,
         )
+
+    async def add_photo_events(
+        self, user_id: UUID, rows: Sequence[tuple[str, date, str | None, str | None, str]],
+    ) -> int:
+        """Events the person confirmed from a timetable / notice photo: (title, day, start "HH:MM"|None,
+        end "HH:MM"|None, kind). ADDS to the "photo" calendar; confirming the same picture twice adds nothing."""
+        if not rows:
+            raise ValidationError("Pick at least one event to add.")
+        if len(rows) > MAX_PHOTO_EVENTS:
+            raise ValidationError(f"Add at most {MAX_PHOTO_EVENTS} events at a time.")
+        now = self._clock()
+        tz = await self._tz(user_id)
+        today = now.astimezone(tz).date()
+        events: list[ParsedEvent] = []
+        for title, day, start, end, kind in rows:
+            clean = " ".join((title or "").split())[:120]
+            if not clean:
+                raise ValidationError("An event has no title.")
+            if kind not in KINDS:
+                raise ValidationError(f"kind must be one of {', '.join(KINDS)}.")
+            if not today - timedelta(days=1) <= day <= today + timedelta(days=400):
+                raise ValidationError(f"{clean}: that date is too far away or in the past.")
+            starts, all_day = self._at(day, start, tz), start is None
+            ends = self._at(day, end, tz) if (end and start and end > start) else None
+            uid = hashlib.sha1(f"{clean.lower()}|{starts.isoformat()}".encode()).hexdigest()[:32] + "@lockin-photo"
+            events.append(ParsedEvent(uid=uid, title=clean, starts_at=starts, ends_at=ends, all_day=all_day, kind=kind))
+        known = await self._repo.sources(user_id)
+        if PHOTO_SOURCE not in {s.source for s in known} and len(known) >= MAX_SOURCES:
+            raise ValidationError(f"You already have {MAX_SOURCES} imported calendars. Remove one first.")
+        if await self._repo.count_other_sources(user_id, PHOTO_SOURCE) + len(events) > MAX_EVENTS_PER_USER:
+            raise ValidationError("That would store too many calendar events. Remove an old calendar first.")
+        return await self._repo.add_events(user_id, PHOTO_SOURCE, events, now)
+
+    @staticmethod
+    def _at(day: date, hhmm: str | None, tz: tzinfo) -> datetime:
+        if not hhmm:
+            return local_midnight(day, tz)          # all-day events sit on local midnight, like imported ones
+        try:
+            h, m = (int(x) for x in hhmm.split(":"))
+            return datetime.combine(day, time(h, m), tzinfo=tz)
+        except ValueError as exc:
+            raise ValidationError(f"{hhmm!r} isn't a time (use HH:MM).") from exc
 
     async def events(
         self, user_id: UUID, start: date | None, end: date | None, kind: str | None,

@@ -106,6 +106,13 @@ class InMemoryCompanionRepository:
         r.acted_at, r.action = now, action
         return replace(r)
 
+    async def mark_dismissed(self, user_id, push_id, now):
+        r = self.rows.get(push_id)
+        if r is None or r.user_id != user_id or r.acted_at is not None or r.dismissed_at is not None:
+            return False
+        r.dismissed_at = now
+        return True
+
     async def prune(self, user_id, before):
         old = [i for i, r in self.rows.items() if r.user_id == user_id and r.sent_at < before]
         for i in old:

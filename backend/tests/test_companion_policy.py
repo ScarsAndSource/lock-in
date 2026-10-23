@@ -311,7 +311,9 @@ def test_ledger_sql_compiles_against_postgres_and_orm_matches_migration():
     assert any("ON CONFLICT" in sql and "DO NOTHING" in sql for sql in compiled)
     assert any("acted_at IS NULL" in sql for sql in compiled)
 
-    migration = (Path(__file__).parent.parent / "migrations" / "016_companion.sql").read_text()
+    migrations = Path(__file__).parent.parent / "migrations"
+    # 016 created the ledger; 022 added dismissed_at (swiped-away pushes).
+    migration = (migrations / "016_companion.sql").read_text() + (migrations / "022_habit_tokens_and_push_dismissal.sql").read_text()
     for col in CompanionPushORM.__table__.columns:
         assert re.search(rf"\b{col.name}\b", migration), col.name
     for col in ("companion_enabled", "checkin_hour", "plan_cues_in_quiet", "discreet_push"):

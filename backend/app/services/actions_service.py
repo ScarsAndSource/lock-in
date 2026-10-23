@@ -62,10 +62,15 @@ class ActionsService:
     async def run_token(self, token: str, action: str) -> ActionResult:
         now = self._clock()
         claims = push_actions.verify(self._secret, token, now)       # ActionTokenError -> router maps to 401 / 410
-        if action != "open" and action not in claims.allowed:
+        if action not in ("open", "dismiss") and action not in claims.allowed:
             raise ValidationError("That action isn't part of this notification.")
         if self._ledger is None:
             raise ValidationError("Actions aren't available.")
+        if action == "dismiss":
+            # Swiped away. Not an action: it claims nothing and changes nothing the person sees. It only tells the
+            # anti-nag backoff "ignored" right now, and only if nobody tapped the push first.
+            await self._ledger.mark_dismissed(claims.user_id, claims.push_id, now)
+            return ActionResult("done", "Dismissed.", claims.kind, action)
         claimed = await self._ledger.mark_acted(claims.user_id, claims.push_id, action, now)
         if claimed is None:
             return ActionResult("already", "Already handled.", claims.kind, action)

@@ -31,6 +31,7 @@ class CompanionRepository(Protocol):
     async def release(self, user_id: UUID, push_id: UUID) -> None: ...
     async def list_since(self, user_id: UUID, since: datetime) -> list[CompanionPush]: ...
     async def mark_acted(self, user_id: UUID, push_id: UUID, action: str, now: datetime) -> CompanionPush | None: ...
+    async def mark_dismissed(self, user_id: UUID, push_id: UUID, now: datetime) -> bool: ...
     async def prune(self, user_id: UUID, before: datetime) -> int: ...
 
     # Spine events & moments
@@ -43,7 +44,7 @@ class CompanionRepository(Protocol):
 def _to_domain(row: CompanionPushORM) -> CompanionPush:
     return CompanionPush(
         id=row.id, user_id=row.user_id, kind=row.kind, key=row.key, local_date=row.local_date,
-        sent_at=row.sent_at, acted_at=row.acted_at, action=row.action,
+        sent_at=row.sent_at, acted_at=row.acted_at, action=row.action, dismissed_at=row.dismissed_at,
     )
 
 
@@ -93,6 +94,20 @@ class SqlAlchemyCompanionRepository:
         )
         row = (await self._session.execute(stmt)).scalar_one_or_none()
         return _to_domain(row) if row is not None else None
+
+    async def mark_dismissed(self, user_id: UUID, push_id: UUID, now: datetime) -> bool:
+        """The person swiped the notification away. Only recorded for a push nobody acted on (a tap or a button
+        wins), and only once. True = this call recorded it."""
+        stmt = (
+            update(CompanionPushORM)
+            .where(
+                CompanionPushORM.id == push_id, CompanionPushORM.user_id == user_id,
+                CompanionPushORM.acted_at.is_(None), CompanionPushORM.dismissed_at.is_(None),
+            )
+            .values(dismissed_at=now)
+            .returning(CompanionPushORM.id)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
 
     async def prune(self, user_id: UUID, before: datetime) -> int:
         result = await self._session.execute(

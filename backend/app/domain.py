@@ -436,6 +436,7 @@ class IngestToken:
     created_at: datetime
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
+    habit_id: UUID | None = None       # set = a key bound to ONE habit (mark-done only); None = sleep / screen-time key
 
 
 @dataclass(slots=True)
@@ -452,6 +453,7 @@ class CompanionPush:
     sent_at: datetime
     acted_at: datetime | None = None
     action: str | None = None
+    dismissed_at: datetime | None = None    # swiped away without acting (service-worker `notificationclose`)
 
 
 @dataclass(slots=True)
@@ -468,3 +470,4 @@ class CompanionPush:
     sent_at: datetime
     acted_at: datetime | None = None
     action: str | None = None
+    dismissed_at: datetime | None = None    # swiped away without acting (service-worker `notificationclose`)

@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 
-/** Where a notification tap lands: /?a=checkin, /?a=habit, /?a=tasks, /?a=plan, /?a=sleep, /?a=study, /?a=focus, /?a=comeback */
-export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study' | 'focus' | 'comeback';
-const KNOWN: ReadonlySet<string> = new Set(['checkin', 'habit', 'tasks', 'plan', 'sleep', 'study', 'focus', 'comeback']);
+/** Where a notification tap lands: /?a=checkin, /?a=habit, /?a=tasks, /?a=plan, /?a=sleep, /?a=study, /?a=focus, /?a=comeback, /?a=insight */
+export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study' | 'focus' | 'comeback' | 'insight';
+const KNOWN: ReadonlySet<string> = new Set([
+  'checkin', 'habit', 'tasks', 'plan', 'sleep', 'study', 'focus', 'comeback', 'insight',
+]);
 
 export interface DeepLinkParams {
   link: DeepLink;

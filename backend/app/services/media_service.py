@@ -20,7 +20,9 @@ from app.services.checkin_parser import MAX_SPEECH_CHARS, ParsedCheckin, build_m
 from app.services.habits_service import HabitsService
 from app.services.llm import LLMBudgetExceeded, LLMError, MediaLLM, seconds_until_reset
 from app.services.profile_service import ProfileService
+from app.services import schedule_image_parser as schedule_parser
 from app.services.screenshot_parser import MAX_IMAGE_BYTES, PROMPT, ParsedScreenshot, parse_reply as parse_screen, sniff_image
+from app.services.task_time import zone
 
 logger = logging.getLogger("lockin.media")
 
@@ -93,4 +95,23 @@ class MediaService:
         parsed = parse_screen(raw)
         if parsed is None:
             raise ValidationError("I couldn't find a daily total in that screenshot. Open the DAY view and try again.")
+        return parsed
+
+    # ------------------------------------------------------------------ timetable / notice photo
+    async def parse_schedule_image(self, user_id: UUID, image: bytes) -> schedule_parser.ParsedSchedule:
+        """A picture of a timetable, date sheet or notice -> proposed events and tasks. Saves nothing."""
+        if not image:
+            raise ValidationError("The image was empty.")
+        if len(image) > MAX_IMAGE_BYTES:
+            raise ValidationError("That image is too large. Use a normal photo or screenshot.")
+        media_type = sniff_image(image)
+        if media_type is None:
+            raise ValidationError("Use a PNG, JPEG or WebP image.")
+        tz = zone((await self._profiles.get(user_id)).timezone)
+        today = self._clock().astimezone(tz).date()
+        prompt = schedule_parser.PROMPT.format(today=today.isoformat())
+        raw = await self._guard(lambda: self._llm.describe_image(image, media_type, prompt, max_tokens=1400))
+        parsed = schedule_parser.parse_reply(raw, today)
+        if parsed is None:
+            raise ValidationError("I couldn't read dates from that picture. Try a sharper, straighter photo.")
         return parsed

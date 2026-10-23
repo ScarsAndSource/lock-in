@@ -54,6 +54,22 @@ export async function captureTasks(text: string): Promise<TaskCaptureResult> {
   return request<TaskCaptureResult>('/tasks/capture', { method: 'POST', body: JSON.stringify({ text }) });
 }
 
+export interface TaskCreate {
+  title: string;
+  importance?: 1 | 2 | 3;
+  due?: string | null; // local "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM"
+}
+
+/** One task with exact fields (used when the words were already parsed elsewhere, e.g. from a photo). */
+export async function createTask(body: TaskCreate): Promise<Task> {
+  if (isDemoMode()) {
+    const t = { ...demoTask(body.title), importance: body.importance ?? 2, due: body.due ?? null };
+    demoTasks = [t, ...demoTasks];
+    return t;
+  }
+  return request<Task>('/tasks', { method: 'POST', body: JSON.stringify(body) });
+}
+
 export async function getTaskFocus(): Promise<TaskFocus> {
   if (isDemoMode()) return demoFocus();
   return request<TaskFocus>('/tasks/focus');

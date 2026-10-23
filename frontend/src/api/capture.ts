@@ -1,4 +1,4 @@
-import { request, isDemoMode, ApiError } from './client';
+import { request, isDemoMode, ApiError, API_BASE } from './client';
 import type { HabitStatus, SupportPayload } from '../types';
 
 /* ------------------------------------------------------------------ check-in capture (typed, voice, screenshot) */
@@ -74,6 +74,8 @@ export interface IngestToken {
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+  /** Set: a key that can only mark this one habit done. Unset: the sleep / screen-time key. */
+  habit_id?: string | null;
 }
 
 /** `token` is returned ONCE, at creation. The server never stores or returns it again. */
@@ -88,9 +90,18 @@ export async function listIngestTokens(): Promise<IngestToken[]> {
   return request<IngestToken[]>('/ingest/tokens');
 }
 
-export async function createIngestToken(label: string): Promise<IngestTokenCreated> {
+export async function createIngestToken(label: string, habitId?: string): Promise<IngestTokenCreated> {
   if (isDemoMode()) return demoBlocked('Automations');
-  return request<IngestTokenCreated>('/ingest/tokens', { method: 'POST', body: JSON.stringify({ label }) });
+  return request<IngestTokenCreated>('/ingest/tokens', {
+    method: 'POST',
+    body: JSON.stringify(habitId ? { label, habit_id: habitId } : { label }),
+  });
+}
+
+/** One pasteable URL for an automation app: the key rides in the path, so no header and no JSON body are needed. */
+export function ingestUrl(token: string, kind: 'sleep_start' | 'sleep_end' | 'screen_time' | 'habit_done'): string {
+  const base = (API_BASE || window.location.origin).replace(/\/$/, '');
+  return `${base}/ingest/u/${encodeURIComponent(token)}/${kind}`;
 }
 
 export async function revokeIngestToken(id: string): Promise<void> {

@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -7,6 +7,7 @@ import { UrgeQuickModal } from './components/UrgeQuickModal';
 import { UrgeFab } from './components/UrgeFab';
 import { Toast } from './components/Toast';
 import { LoginScreen } from './components/LoginScreen';
+import { useDeepLink } from './lib/deepLink';
 
 // Each tab and sheet is its own chunk: a screen's code only downloads when it is first opened.
 const NowView = lazy(() => import('./views/NowView').then((m) => ({ default: m.NowView })));
@@ -14,12 +15,15 @@ const ChatView = lazy(() => import('./views/ChatView').then((m) => ({ default: m
 const MirrorView = lazy(() => import('./views/MirrorView').then((m) => ({ default: m.MirrorView })));
 const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })));
 const DomainSheet = lazy(() => import('./components/DomainSheet').then((m) => ({ default: m.DomainSheet })));
+const TriageSheet = lazy(() => import('./components/TriageSheet').then((m) => ({ default: m.TriageSheet })));
 
 const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror' } as const;
 
 export const AppContent: React.FC = () => {
   const {
     activeTab,
+    setActiveTab,
+    openDomain,
     checkinModalOpen,
     setCheckinModalOpen,
     urgeQuickModalOpen,
@@ -30,6 +34,36 @@ export const AppContent: React.FC = () => {
     demoMode,
     token,
   } = useApp();
+
+  const [triageOpen, setTriageOpen] = useState(false);
+
+  // A notification body tap lands on /?a=<where>. Every push the companion sends names one of these, and on iPhone
+  // (no lock-screen buttons) this is how the tap finishes the job. Must run before the signed-out early return.
+  useDeepLink((link) => {
+    switch (link) {
+      case 'tasks':
+        setActiveTab('now');
+        setTriageOpen(true);
+        break;
+      case 'checkin':
+        setCheckinModalOpen(true);
+        break;
+      case 'plan':
+        setSettingsOpen(true);
+        break;
+      case 'sleep':
+        openDomain('sleep');
+        break;
+      case 'study':
+        openDomain('study');
+        break;
+      case 'insight':
+        setActiveTab('mirror');
+        break;
+      default: // habit, focus, comeback: the Now tab shows the next thing itself
+        setActiveTab('now');
+    }
+  });
 
   // Live mode with no session: login first. Demo mode is an explicit opt-in from the login screen.
   if (!demoMode && !token) {
@@ -57,6 +91,7 @@ export const AppContent: React.FC = () => {
       <Suspense fallback={null}>
         {domainSheet && <DomainSheet />}
         {settingsOpen && <SettingsSheet />}
+        {triageOpen && <TriageSheet open onClose={() => setTriageOpen(false)} />}
       </Suspense>
 
       <Toast />

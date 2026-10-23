@@ -21,6 +21,41 @@ class ImportOut(BaseModel):
     warnings: list[str]
 
 
+_HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class ProposedItemOut(BaseModel):
+    """One thing read off a photo. `type` event goes on the calendar, `task` becomes a task. Nothing is saved yet."""
+    type: Literal["event", "task"]
+    title: str
+    date: date | None
+    start: str | None = Field(default=None, pattern=_HHMM)
+    end: str | None = Field(default=None, pattern=_HHMM)
+    kind: Literal["exam", "class", "other"] | None = None
+
+
+class ScheduleProposalOut(BaseModel):
+    items: list[ProposedItemOut]
+    skipped: int          # undated or unreadable entries (a weekly timetable has no dates): add those by hand or via .ics
+
+
+class PhotoEventIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    date: date
+    start: str | None = Field(default=None, pattern=_HHMM)
+    end: str | None = Field(default=None, pattern=_HHMM)
+    kind: Literal["exam", "class", "other"] = "other"
+
+
+class PhotoEventsIn(BaseModel):
+    events: list[PhotoEventIn] = Field(min_length=1, max_length=60)
+
+
+class PhotoEventsOut(BaseModel):
+    added: int
+    duplicates: int
+
+
 class EventOut(BaseModel):
     id: str
     title: str

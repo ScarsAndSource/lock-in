@@ -4,16 +4,21 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dates import Clock
-from app.deps import get_clock, get_db, get_profile_service
+from app.deps import get_clock, get_db, get_media_service, get_profile_service
 from app.ratelimit import rate_limit
 from app.repositories.calendar_repository import CalendarEvent, SqlAlchemyCalendarRepository
-from app.schemas_calendar import EventOut, ExamOut, ImportIn, ImportOut, KindIn, SourceOut
+from app.schemas_calendar import (
+    EventOut, ExamOut, ImportIn, ImportOut, KindIn, PhotoEventsIn, PhotoEventsOut, ProposedItemOut,
+    ScheduleProposalOut, SourceOut,
+)
 from app.security import get_current_user_id
 from app.services.calendar_service import CalendarService
+from app.services.media_service import MediaService
+from app.services.screenshot_parser import MAX_IMAGE_BYTES
 from app.services.profile_service import ProfileService
 from app.services.task_time import zone
 
@@ -56,6 +61,45 @@ async def import_calendar(
         skipped=result.skipped,
         warnings=list(result.warnings),
     )
+
+
+@router.post(
+    "/parse-image", response_model=ScheduleProposalOut,
+    dependencies=[
+        Depends(rate_limit("media_minute", limit_setting="rate_limit_media_per_minute")),
+        Depends(rate_limit("media_hour", limit_setting="rate_limit_media_per_hour", window_seconds=3600)),
+    ],
+)
+async def parse_image(
+    image: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_id),
+    service: MediaService = Depends(get_media_service),
+) -> ScheduleProposalOut:
+    """A photo or screenshot of a timetable, date sheet or notice -> a PROPOSAL of events and tasks. Saves nothing:
+    the person ticks what is right and confirms (events via POST /calendar/photo-events, tasks via POST /tasks).
+    The file type comes from its bytes, never from what it claims."""
+    data = await image.read(MAX_IMAGE_BYTES + 1)
+    parsed = await service.parse_schedule_image(user_id, data)
+    return ScheduleProposalOut(
+        items=[
+            ProposedItemOut(type=i.type, title=i.title, date=i.day, start=i.start, end=i.end, kind=i.kind)  # type: ignore[arg-type]
+            for i in parsed.items
+        ],
+        skipped=parsed.skipped,
+    )
+
+
+@router.post("/photo-events", response_model=PhotoEventsOut)
+async def add_photo_events(
+    body: PhotoEventsIn,
+    user_id: UUID = Depends(get_current_user_id),
+    service: CalendarService = Depends(get_calendar_service),
+) -> PhotoEventsOut:
+    """Add the events the person confirmed from a photo to their "photo" calendar. Idempotent per event."""
+    added = await service.add_photo_events(
+        user_id, [(e.title, e.date, e.start, e.end, e.kind) for e in body.events],
+    )
+    return PhotoEventsOut(added=added, duplicates=len(body.events) - added)
 
 
 @router.get("/events", response_model=list[EventOut])

@@ -167,7 +167,8 @@ def ignored_streak(
             break
         if kind in RESOLVABLE_KINDS and row.local_date in confirmed_dates:
             break                                  # they dealt with that day in the app: not ignored
-        if not declined and now - row.sent_at < PENDING_GRACE:
+        swiped = row.dismissed_at is not None      # swiped away: that is an answer too, no need to wait out the grace
+        if not declined and not swiped and now - row.sent_at < PENDING_GRACE:
             continue                               # too fresh to call ignored
         streak += 1
     return streak

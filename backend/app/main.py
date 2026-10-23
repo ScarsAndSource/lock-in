@@ -29,7 +29,26 @@ _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 _MAX_BODY_BYTES = 256 * 1024
 # The only routes that take a file. The services re-check the real size while reading, so this is just the front gate.
 _UPLOAD_BODY_BYTES = 5 * 1024 * 1024
-_UPLOAD_PATHS = frozenset({"/checkins/voice", "/screen-time/parse-screenshot"})
+_UPLOAD_PATHS = frozenset({"/checkins/voice", "/screen-time/parse-screenshot", "/calendar/parse-image"})
+# /ingest/u/<token>/<kind> carries a credential in the path: it must never reach a log line.
+_INGEST_TOKEN_PATH = re.compile(r"(/ingest/u/)[^/?\s]+")
+
+
+def redact_path(path: str) -> str:
+    return _INGEST_TOKEN_PATH.sub(r"\1***", path)
+
+
+class _RedactIngestToken(logging.Filter):
+    """uvicorn's access log is (client, method, path, http_version, status): scrub the path in place."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            record.args = (*args[:2], redact_path(args[2]), *args[3:])
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactIngestToken())
 
 
 @asynccontextmanager
@@ -129,7 +148,7 @@ async def integrity_handler(request: Request, exc: DataIntegrityError) -> JSONRe
 @app.exception_handler(Exception)
 async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     request_id = getattr(request.state, "request_id", "unknown")
-    logger.exception("Unhandled error request_id=%s path=%s", request_id, request.url.path)
+    logger.exception("Unhandled error request_id=%s path=%s", request_id, redact_path(request.url.path))
     return JSONResponse(
         status_code=500, content={"detail": "Internal error.", "request_id": request_id}, headers=_cors_headers(request),
     )

@@ -196,8 +196,12 @@ class NotificationsService:
             "title": msg.title, "body": msg.body, "tag": msg.tag, "url": msg.url, "digest": msg.digest,
             "kind": msg.kind,
         }
-        if msg.actions and push_id is not None and self._secret:
-            payload["actions"] = [{"action": a, "title": label} for a, label in msg.actions]
+        if push_id is not None and self._secret:
+            # Every tracked push carries a token, buttons or not: the service worker needs it to report a tap ("open")
+            # and a swipe-away ("dismiss"). Like "open", "dismiss" is always accepted, so `allowed` stays exactly the
+            # list of real actions (the buttons).
+            if msg.actions:
+                payload["actions"] = [{"action": a, "title": label} for a, label in msg.actions]
             payload["token"] = push_actions.mint(
                 self._secret, user_id=user_id, push_id=push_id, kind=msg.kind,
                 args={k: str(v) for k, v in msg.args.items()},

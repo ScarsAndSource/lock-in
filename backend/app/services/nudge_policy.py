@@ -16,6 +16,7 @@ Design (SPEC section 6 reminder principle + section 8 "no escalating guilt notif
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from uuid import UUID
@@ -169,8 +170,12 @@ def plan_pushes(
         one = len(digest_items) == 1
         noun = ("thing open" if one else "things open") if overflow else ("small thing" if one else "small things")
         label = f"{len(digest_items)} {noun}"
+        # Tracked like every other push (ledger row + signed token) so a tap and a swipe-away are both recorded. The
+        # key changes whenever the set or any nudge count changes, so a later digest is never mistaken for a repeat.
+        sig = "|".join(f"{t.id}:{t.nudge_count}" for t in sorted(digest_items, key=lambda t: str(t.id)))
         out.append(PushMessage(
             task_ids=tuple(t.id for t in digest_items), title=label, body=body, tag="digest", digest=True,
-            kind="task-digest", url="/?a=tasks", priority=30,
+            kind="task-digest", key="digest:" + hashlib.sha1(sig.encode()).hexdigest()[:24],
+            url="/?a=tasks", priority=30, ttl_minutes=24 * 60,
         ))
     return out
