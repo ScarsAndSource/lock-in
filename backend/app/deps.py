@@ -41,7 +41,9 @@ from app.services.checkins_service import CheckinsService
 from app.repositories.calendar_repository import SqlAlchemyCalendarRepository
 from app.services.calendar_service import CalendarService
 from app.services.companion_service import CompanionService
+from app.repositories.growth_repository import SqlAlchemyGrowthRepository
 from app.services.goals_service import GoalsService
+from app.services.growth_service import GrowthService
 from app.services.habits_service import HabitsService
 from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
@@ -505,3 +507,16 @@ def get_experiments_service(
 ) -> ExperimentsService:
     return ExperimentsService(repo, stats, profiles, clock)
 
+def get_growth_service(
+    session: AsyncSession = Depends(get_db),
+    encryptor: FieldEncryptor = Depends(get_field_encryptor),
+    profiles: ProfileService = Depends(get_profile_service),
+    stats: StatsService = Depends(get_stats_service),
+    habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    habits: HabitsService = Depends(get_habits_service),
+    intentions: IntentionsService = Depends(get_intentions_service),
+    clock: Clock = Depends(get_clock),
+) -> GrowthService:
+    return GrowthService(
+        SqlAlchemyGrowthRepository(session), encryptor, profiles, stats, habit_repo, habits, intentions, clock,
+    )

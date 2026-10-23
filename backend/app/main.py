@@ -19,7 +19,7 @@ from app.routers import calendar as calendar_router
 from app.routers import (
     actions, chat, chat_actions, companion, experiments, inference, ingest, chat_threads, checkins, goals, habits, insights, intentions, missions, mood, notifications,
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
-    study, support, tasks, urges,
+    study, support, tasks, urges, growth,
 )
 from app.schema_check import check_schema
 
@@ -29,7 +29,9 @@ _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 _MAX_BODY_BYTES = 256 * 1024
 # The only routes that take a file. The services re-check the real size while reading, so this is just the front gate.
 _UPLOAD_BODY_BYTES = 5 * 1024 * 1024
-_UPLOAD_PATHS = frozenset({"/checkins/voice", "/screen-time/parse-screenshot", "/calendar/parse-image"})
+_UPLOAD_PATHS = frozenset({
+    "/checkins/voice", "/screen-time/parse-screenshot", "/calendar/parse-image", "/growth/future",
+})
 # /ingest/u/<token>/<kind> carries a credential in the path: it must never reach a log line.
 _INGEST_TOKEN_PATH = re.compile(r"(/ingest/u/)[^/?\s]+")
 
@@ -173,5 +175,6 @@ for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
     study, urges, goals, intentions, chat, chat_threads, support, pauses, pause_shortcuts,
     tasks, notifications, mood, actions, chat_actions, ingest, companion, experiments, inference, calendar_router,
+    growth,
 ):
     app.include_router(module.router)
