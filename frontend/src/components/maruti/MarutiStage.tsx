@@ -1,6 +1,7 @@
 import React from 'react';
 import { BUDDY_NAME } from '../Buddy';
 import { MarutiSprite } from './MarutiSprite';
+import { shownMood } from './useMarutiBrain';
 import type { MarutiBrain } from './useMarutiBrain';
 
 const Bubble: React.FC<{ text: string; className?: string }> = ({ text, className = '' }) => (
@@ -37,7 +38,10 @@ export const MarutiControls: React.FC<{ brain: MarutiBrain; className?: string }
   </div>
 );
 
-/** Empty chat: Maruti on the hillside, strolling, flying, waving and greeting you. Tap him. */
+/**
+ * Empty chat: Maruti on the hillside, strolling, hovering, joking and rolling with laughter. Tap him.
+ * While the roaming overlay is him (flying, eavesdropping, standing guard) this sprite hides and its bubble moves with him.
+ */
 export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
   <div className="space-y-2">
     <div className="relative w-full overflow-hidden rounded-2xl border border-line" style={{ aspectRatio: '1024 / 559' }}>
@@ -49,9 +53,15 @@ export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
           transform: `translate(${brain.x * 100}%, ${brain.y * 100}%)`, transition: `transform ${brain.walkMs}ms ease-in-out`,
         }}
       >
-        <MarutiSprite mood={brain.mood} flip={brain.flip} onTap={brain.poke} />
+        <MarutiSprite
+          home
+          mood={shownMood(brain)}
+          flip={brain.flip}
+          onTap={brain.poke}
+          className={brain.away ? 'invisible' : ''}
+        />
       </div>
-      {brain.bubble && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%]" />}
+      {brain.bubble && !brain.away && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%]" />}
       <MarutiControls brain={brain} className="absolute right-2 top-2" />
     </div>
     <p className="font-section text-section text-ink">Hey, I’m {BUDDY_NAME}.</p>
@@ -62,13 +72,19 @@ export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
 export const MarutiStrip: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
   <div className="flex items-end gap-2 mb-2 shrink-0">
     <div className="w-[52px] shrink-0">
-      <MarutiSprite mood={brain.mood} flip={brain.flip} onTap={brain.poke} />
+      <MarutiSprite
+        home
+        mood={shownMood(brain)}
+        flip={brain.flip}
+        onTap={brain.poke}
+        className={brain.away ? 'invisible' : ''}
+      />
     </div>
     <div className="flex-1 min-w-0 min-h-[40px] flex items-center">
-      {brain.bubble ? (
+      {brain.bubble && !brain.away ? (
         <Bubble text={brain.bubble} />
       ) : (
-        <span className="font-caption text-caption text-muted-text">{BUDDY_NAME} is here. Tap him.</span>
+        !brain.away && <span className="font-caption text-caption text-muted-text">{BUDDY_NAME} is here. Tap him.</span>
       )}
     </div>
     <MarutiControls brain={brain} />

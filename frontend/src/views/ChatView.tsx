@@ -9,6 +9,7 @@ import { BUDDY_NAME, BuddyAvatar } from '../components/Buddy';
 import { MarutiHero, MarutiStrip } from '../components/maruti/MarutiStage';
 import { TypedText } from '../components/maruti/TypedText';
 import { useMaruti } from '../components/maruti/MarutiContext';
+import { classify } from '../components/maruti/banter';
 import { FAILED, GREETINGS, SUPPORT, dayPart, pick } from '../components/maruti/lines';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
@@ -70,7 +71,7 @@ export const ChatView: React.FC = () => {
   useEffect(() => {
     const id = window.setTimeout(() => {
       const b = brainRef.current;
-      if (messageCountRef.current === 0 && !b.bubble && b.mood === 'idle' && !b.quiet) {
+      if (messageCountRef.current === 0 && !b.bubble && b.mood === 'idle' && !b.quiet && !b.comfort) {
         b.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
       }
     }, 900);
@@ -82,14 +83,25 @@ export const ChatView: React.FC = () => {
     if (!text || isSending) return;
     setInputText('');
     setIsSending(true);
-    brain.thinking();
+
+    // Maruti reacts to how you wrote it before the answer arrives (laughs with you, goes serious, stands guard).
+    // Reacting is only his body language: what counts as a support reply still comes from the server.
+    const kind = classify(text);
+    if (kind === 'crisis') {
+      brain.sober(true);
+      brain.act('serious', 0);
+    } else if (kind) {
+      brain.react(kind);
+    } else {
+      brain.thinking();
+    }
 
     try {
       const res = await sendMessage(text, activeThreadId || undefined);
       setMessages((prev) => [...prev, res.user_message, res.reply]);
       // The reply says "one of the lines below", so the resources must actually be on screen.
       let nextSupport = res.support ?? null;
-      if (!nextSupport && res.reply.mode === 'support') {
+      if (!nextSupport && (res.reply.mode === 'support' || kind === 'crisis')) {
         try {
           nextSupport = await fetchSupport(profile?.timezone);
         } catch {
@@ -101,10 +113,11 @@ export const ChatView: React.FC = () => {
         setActiveThreadId(res.thread.id);
         setThreads((prev) => [res.thread, ...prev]);
       }
-      if (res.reply.mode === 'support' || nextSupport) {
+      if (res.reply.mode === 'support' || nextSupport || kind === 'crisis') {
         // A support reply is never animated, joked about or read aloud: Maruti stays still and points to the help.
         brain.sober(true);
-        brain.say(pick(SUPPORT), { mood: 'idle', speak: false, hold: 9000 });
+        if (nextSupport) brain.say(pick(SUPPORT), { mood: 'idle', speak: false, hold: 9000 });
+        else brain.settle();
       } else {
         brain.sober(false);
         setTypingId(res.reply.id);
@@ -130,11 +143,12 @@ export const ChatView: React.FC = () => {
     setSupport(null);
     setTypingId(null);
     brain.sober(false);
+    brain.setComfort(false, true);
     brain.settle();
     brain.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
   };
 
-  // Typing makes him think; clearing the box lets him relax again.
+  // Typing makes him think and lean in; clearing the box lets him relax and fly back.
   const onInput = (value: string) => {
     setInputText(value);
     if (!value.trim()) brain.stopListening();

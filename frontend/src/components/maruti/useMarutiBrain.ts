@@ -2,10 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AFTER_REPLY, IDLE_CHATTER, IDLE_THOUGHTS, NUDGES, POKES, POKES_MANY, PONDER, THINKING, WAKE, WAVES, pick,
 } from './lines';
+import {
+  ANGRY_BACK, BORED_BACK, COMFORT_END, EAVES, GREET_BACK, GUARD_LINES, JOKES, LAUGH_BACK, SAD_BACK, THANKS_BACK, TIRED_BACK, WIN_BACK,
+} from './banter';
+import type { Reaction } from './banter';
 
 export type MarutiMood =
   | 'idle' | 'talking' | 'thinking' | 'ponder' | 'listening' | 'cheer' | 'twirl'
-  | 'walk' | 'fly' | 'climb' | 'hang' | 'peek' | 'wave' | 'sleep';
+  | 'walk' | 'fly' | 'climb' | 'hang' | 'peek' | 'wave' | 'sleep'
+  | 'laugh' | 'rofl' | 'sad' | 'strong' | 'serious' | 'eavesdrop';
 
 const VOICE_KEY = 'lockin.maruti.voice';
 const CALM_KEY = 'lockin.maruti.calm';
@@ -13,6 +18,11 @@ const TYPE_MS = 28;
 const MAX_X = 0.45; // how far he strolls, as a fraction of his own width
 const SLEEP_AFTER_MS = 75000;
 const SOBER_MS = 30 * 60 * 1000;
+const COMFORT_MS = 5 * 60 * 1000;
+const EAVES_START_MS = 1100;
+const EAVES_END_MS = 7000;
+/** Moods a quick reaction leaves him in; when the reply is still pending he goes back to "thinking". */
+const REACTION_MOODS: MarutiMood[] = ['laugh', 'rofl', 'wave', 'cheer', 'twirl', 'serious', 'sad', 'ponder'];
 
 const readFlag = (key: string): boolean => {
   try {
@@ -57,8 +67,17 @@ export interface MarutiBrain {
   voice: boolean;
   /** True after a support reply: he stays still and serious everywhere. */
   quiet: boolean;
+  /** You are sad: he grows and stands guard next to you. */
+  comfort: boolean;
+  /** The roaming overlay is him right now; the in-page sprite hides. */
+  away: boolean;
+  /** You are typing and he has gone to lean in on the input box. */
+  eavesdrop: boolean;
   say: (text: string, opts?: SayOptions) => void;
   act: (mood: MarutiMood, ms?: number) => void;
+  setAway: (on: boolean) => void;
+  setComfort: (on: boolean, silent?: boolean) => void;
+  react: (kind: Exclude<Reaction, 'crisis'>) => void;
   listening: () => void;
   stopListening: () => void;
   thinking: () => void;
@@ -71,10 +90,19 @@ export interface MarutiBrain {
   toggleVoice: () => void;
 }
 
+/** What the sprite should actually show: serious after a support reply, standing tall while comforting. */
+export function shownMood(b: Pick<MarutiBrain, 'mood' | 'comfort' | 'quiet'>): MarutiMood {
+  if (b.mood === 'idle') {
+    if (b.comfort) return 'strong';
+    if (b.quiet) return 'serious';
+  }
+  return b.mood;
+}
+
 /**
  * Maruti's behaviour, one shared instance for the whole app. `wander` is true only while his own tab is open:
- * then he strolls, flies and waves inside the hero. On other tabs the roamer overlay drives him through `act`/`say`.
- * Wandering needs: idle, visible, not calm mode, not reduced motion, not after a support reply (sober).
+ * then he strolls, hovers, waves, jokes and rolls inside the hero. Everywhere else the roamer overlay drives him
+ * through `act`/`say`. Wandering needs: idle, visible, not calm mode, not reduced motion, not sober, not comforting.
  */
 export function useMarutiBrain(wander = true): MarutiBrain {
   const [mood, setMoodState] = useState<MarutiMood>('idle');
@@ -84,14 +112,20 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   const [flip, setFlip] = useState(false);
   const [walkMs, setWalkMs] = useState(1400);
   const [quiet, setQuiet] = useState(false);
+  const [comfort, setComfortState] = useState(false);
+  const [away, setAwayState] = useState(false);
+  const [eavesdrop, setEavesdrop] = useState(false);
   const [calm, setCalm] = useState<boolean>(() => readFlag(CALM_KEY));
   const [voice, setVoice] = useState<boolean>(() => readFlag(VOICE_KEY));
 
   const moodRef = useRef<MarutiMood>('idle');
   const xRef = useRef(0);
   const wanderRef = useRef(wander);
+  const calmRef = useRef(calm);
   const voiceRef = useRef(voice);
   const soberRef = useRef(false);
+  const comfortRef = useRef(false);
+  const eavesRef = useRef(false);
   const speakingRef = useRef(false);
   const typedDoneRef = useRef(true);
   const typeTimer = useRef<number | null>(null);
@@ -102,18 +136,26 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   const followTimer = useRef<number | null>(null);
   const safetyTimer = useRef<number | null>(null);
   const soberTimer = useRef<number | null>(null);
+  const comfortTimer = useRef<number | null>(null);
+  const resumeTimer = useRef<number | null>(null);
+  const jokeTimer = useRef<number | null>(null);
+  const eavesStartTimer = useRef<number | null>(null);
+  const eavesEndTimer = useRef<number | null>(null);
   const pokes = useRef({ count: 0, last: 0 });
   const lastLine = useRef<string | undefined>(undefined);
   const lastThought = useRef(0);
   const lastActive = useRef(Date.now());
 
   wanderRef.current = wander;
+  calmRef.current = calm;
   voiceRef.current = voice;
 
   const setMood = useCallback((m: MarutiMood) => {
     moodRef.current = m;
     setMoodState(m);
   }, []);
+
+  const setAway = useCallback((on: boolean) => setAwayState(on), []);
 
   const cancelSpeech = useCallback(() => {
     speakingRef.current = false;
@@ -128,8 +170,20 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     clearTimer(nudgeTimer);
     clearTimer(followTimer);
     clearTimer(safetyTimer);
+    clearTimer(resumeTimer);
+    clearTimer(jokeTimer);
     cancelSpeech();
   }, [cancelSpeech]);
+
+  /** He stops leaning in on the input box. */
+  const stopEaves = useCallback(() => {
+    clearTimer(eavesStartTimer);
+    clearTimer(eavesEndTimer);
+    if (eavesRef.current) {
+      eavesRef.current = false;
+      setEavesdrop(false);
+    }
+  }, []);
 
   const speak = useCallback((text: string, onEnd?: () => void) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
@@ -200,6 +254,26 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     [setMood, speak, stopTalk, toIdle],
   );
 
+  /** Turn comfort mode (he grows and stands guard) on or off. It also expires by itself. */
+  const setComfort = useCallback(
+    (on: boolean, silent = false) => {
+      const was = comfortRef.current;
+      comfortRef.current = on;
+      setComfortState(on);
+      clearTimer(comfortTimer);
+      if (on) {
+        stopEaves();
+        comfortTimer.current = window.setTimeout(() => {
+          comfortRef.current = false;
+          setComfortState(false);
+        }, COMFORT_MS);
+      } else if (was && !silent && !soberRef.current) {
+        say(pick(COMFORT_END, lastLine.current), { speak: false });
+      }
+    },
+    [say, stopEaves],
+  );
+
   const endTalkIfDone = useCallback(() => {
     if (moodRef.current === 'talking' && typedDoneRef.current && !speakingRef.current) toIdle(150);
   }, [toIdle]);
@@ -208,6 +282,7 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   const talkReply = useCallback(
     (text: string, speakIt = true) => {
       stopTalk();
+      stopEaves();
       setBubble('');
       setMood('talking');
       typedDoneRef.current = false;
@@ -218,17 +293,17 @@ export function useMarutiBrain(wander = true): MarutiBrain {
       }, 14000);
       if (voiceRef.current && speakIt) speak(text, endTalkIfDone);
     },
-    [cancelSpeech, endTalkIfDone, setMood, speak, stopTalk, toIdle],
+    [cancelSpeech, endTalkIfDone, setMood, speak, stopEaves, stopTalk, toIdle],
   );
 
   const finishTalk = useCallback(() => {
     typedDoneRef.current = true;
     endTalkIfDone();
-    // Now and then he adds a little something after a reply, never after a support reply.
-    if (!soberRef.current && Math.random() < 0.3) {
+    // Now and then he adds a little something after a reply, never in a serious moment.
+    if (!soberRef.current && !comfortRef.current && Math.random() < 0.3) {
       clearTimer(followTimer);
       followTimer.current = window.setTimeout(() => {
-        if (!soberRef.current && moodRef.current === 'idle') {
+        if (!soberRef.current && !comfortRef.current && moodRef.current === 'idle') {
           say(pick(AFTER_REPLY, lastLine.current), { mood: 'cheer', speak: false, hold: 4000 });
         }
       }, 1400);
@@ -237,14 +312,65 @@ export function useMarutiBrain(wander = true): MarutiBrain {
 
   const thinking = useCallback(() => {
     stopTalk();
+    stopEaves();
     typedDoneRef.current = true;
     lastThought.current = 0;
     setMood('thinking');
     setBubble(pick(THINKING, lastLine.current));
     holdTimer.current = window.setTimeout(() => setBubble(''), 6000);
-  }, [setMood, stopTalk]);
+  }, [setMood, stopEaves, stopTalk]);
 
-  /** You are typing: he goes into a thinking pose, offers a "hmm" now and then, and nudges if you stall. */
+  /** You just sent a message and he reacts to what it says; he goes back to thinking while the reply loads. */
+  const react = useCallback(
+    (kind: Exclude<Reaction, 'crisis'>) => {
+      if (soberRef.current) {
+        thinking();
+        return;
+      }
+      const last = lastLine.current;
+      let ms = 1500;
+      const line = (pool: readonly string[], m: MarutiMood, hold = 3200) =>
+        say(pick(pool, last), { mood: m, keep: true, speak: false, hold });
+      switch (kind) {
+        case 'laugh':
+          ms = 2300;
+          line(LAUGH_BACK, Math.random() < 0.45 ? 'rofl' : 'laugh');
+          break;
+        case 'greet':
+          line(GREET_BACK, 'wave');
+          break;
+        case 'thanks':
+          line(THANKS_BACK, 'cheer');
+          break;
+        case 'win':
+          ms = 1800;
+          line(WIN_BACK, 'cheer');
+          break;
+        case 'tired':
+          ms = 1800;
+          line(TIRED_BACK, 'ponder', 4000);
+          break;
+        case 'bored':
+          line(BORED_BACK, 'twirl');
+          break;
+        case 'angry':
+          line(ANGRY_BACK, 'serious', 4000);
+          break;
+        case 'sad':
+          ms = 2600;
+          line(SAD_BACK, 'sad', 7000);
+          setComfort(true);
+          break;
+      }
+      clearTimer(resumeTimer);
+      resumeTimer.current = window.setTimeout(() => {
+        if (REACTION_MOODS.includes(moodRef.current)) thinking();
+      }, ms);
+    },
+    [say, setComfort, thinking],
+  );
+
+  /** You are typing: he thinks, offers a "hmm", leans in on the input box, and nudges if you stall. */
   const listening = useCallback(() => {
     const m = moodRef.current;
     if (m === 'thinking' || m === 'talking' || m === 'sleep') return;
@@ -255,39 +381,56 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     const now = Date.now();
     if (!soberRef.current && now - lastThought.current > 5500) {
       lastThought.current = now;
-      const line = pick(PONDER, lastLine.current);
+      const pool = comfortRef.current ? GUARD_LINES : eavesRef.current ? EAVES : PONDER;
+      const line = pick(pool, lastLine.current);
       lastLine.current = line;
       setBubble(line);
       clearTimer(holdTimer);
-      holdTimer.current = window.setTimeout(() => setBubble(''), 2400);
+      holdTimer.current = window.setTimeout(() => setBubble(''), 2600);
     }
     clearTimer(listenTimer);
     listenTimer.current = window.setTimeout(() => {
       if (moodRef.current === 'ponder') setMood('idle');
     }, 2600);
     clearTimer(nudgeTimer);
-    nudgeTimer.current = window.setTimeout(() => {
-      if (!soberRef.current && moodRef.current === 'idle') say(pick(NUDGES, lastLine.current), { speak: false });
-    }, 8000);
-  }, [say, setMood]);
+    if (!comfortRef.current) {
+      nudgeTimer.current = window.setTimeout(() => {
+        if (!soberRef.current && moodRef.current === 'idle') say(pick(NUDGES, lastLine.current), { speak: false });
+      }, 8000);
+    }
+    if (!soberRef.current && !comfortRef.current && !calmRef.current && !prefersReducedMotion()) {
+      if (!eavesRef.current && eavesStartTimer.current === null) {
+        eavesStartTimer.current = window.setTimeout(() => {
+          eavesStartTimer.current = null;
+          eavesRef.current = true;
+          setEavesdrop(true);
+        }, EAVES_START_MS);
+      }
+      clearTimer(eavesEndTimer);
+      eavesEndTimer.current = window.setTimeout(() => stopEaves(), EAVES_END_MS);
+    }
+  }, [say, setMood, stopEaves]);
 
-  /** The input was cleared: stop thinking, stop nudging. */
+  /** The input was cleared: stop thinking, stop nudging, come back from the input box. */
   const stopListening = useCallback(() => {
     clearTimer(listenTimer);
     clearTimer(nudgeTimer);
+    stopEaves();
     if (moodRef.current === 'ponder') setMood('idle');
-  }, [setMood]);
+  }, [setMood, stopEaves]);
 
   const poke = useCallback(() => {
     const now = Date.now();
     pokes.current.count = now - pokes.current.last < 4000 ? pokes.current.count + 1 : 1;
     pokes.current.last = now;
     const n = pokes.current.count;
-    if (n >= 6) {
+    if (comfortRef.current || soberRef.current) {
+      say(pick(GUARD_LINES, lastLine.current), { speak: false, hold: 4000 });
+    } else if (n >= 6) {
       pokes.current.count = 0;
-      say(pick(POKES_MANY, lastLine.current), { mood: 'cheer', hold: 5000 });
+      say(pick(POKES_MANY, lastLine.current), { mood: 'rofl', hold: 5000 });
     } else if (n === 3) {
-      say('Arre wah, ab hanste hain.', { mood: 'cheer', speak: false });
+      say('Arre wah, ab hanste hain. Haha!', { mood: 'laugh', speak: false });
     } else {
       say(pick(POKES, lastLine.current), { mood: 'twirl', speak: false });
     }
@@ -295,11 +438,12 @@ export function useMarutiBrain(wander = true): MarutiBrain {
 
   const settle = useCallback(() => {
     stopTalk();
+    stopEaves();
     typedDoneRef.current = true;
     lastThought.current = 0;
     setBubble('');
     setMood('idle');
-  }, [setMood, stopTalk]);
+  }, [setMood, stopEaves, stopTalk]);
 
   const sober = useCallback(
     (on: boolean) => {
@@ -307,7 +451,9 @@ export function useMarutiBrain(wander = true): MarutiBrain {
       setQuiet(on);
       clearTimer(soberTimer);
       if (on) {
+        setComfort(false, true);
         stopTalk();
+        stopEaves();
         typedDoneRef.current = true;
         setMood('idle');
         soberTimer.current = window.setTimeout(() => {
@@ -316,7 +462,7 @@ export function useMarutiBrain(wander = true): MarutiBrain {
         }, SOBER_MS);
       }
     },
-    [setMood, stopTalk],
+    [setComfort, setMood, stopEaves, stopTalk],
   );
 
   const toggleCalm = useCallback(() => {
@@ -340,10 +486,11 @@ export function useMarutiBrain(wander = true): MarutiBrain {
       xRef.current = 0;
       setX(0);
       setY(0);
+      stopEaves();
     }
-  }, [wander]);
+  }, [wander, stopEaves]);
 
-  // Wandering inside the hero: only when idle, visible, on his own tab, and the person hasn't asked for calm.
+  // Wandering inside the hero: strolls, hovers, waves, tells jokes and laughs at them, now and then rolls.
   useEffect(() => {
     if (calm || prefersReducedMotion()) return;
     let id: number;
@@ -366,32 +513,48 @@ export function useMarutiBrain(wander = true): MarutiBrain {
         setMood('idle');
       }, ms + 100);
     };
+    const joke = () => {
+      const text = pick(JOKES, lastLine.current);
+      say(text, { mood: 'talking', keep: true, speak: false, hold: 4500 });
+      jokeTimer.current = window.setTimeout(() => {
+        if (soberRef.current || comfortRef.current || !wanderRef.current) return;
+        if (Math.random() < 0.45) move(pickX(0.6), 'rofl', 2200, 0);
+        else act('laugh', 1800);
+      }, Math.min(text.length, 90) * TYPE_MS + 400);
+    };
     const tick = () => {
       id = window.setTimeout(() => {
-        if (wanderRef.current && document.visibilityState === 'visible' && moodRef.current === 'idle' && !soberRef.current) {
+        if (
+          wanderRef.current && document.visibilityState === 'visible' && moodRef.current === 'idle' &&
+          !soberRef.current && !comfortRef.current
+        ) {
           const r = Math.random();
-          if (r < 0.34) {
-            move(pickX(MAX_X), 'walk', 1400, 0);
-          } else if (r < 0.48) {
+          if (r < 0.28) move(pickX(MAX_X), 'walk', 1400, 0);
+          else if (r < 0.4) {
             setMood('twirl');
             clearTimer(moodTimer);
             moodTimer.current = window.setTimeout(() => setMood('idle'), 1200);
-          } else if (r < 0.64) {
-            move(pickX(0.85), 'fly', 1900, -0.09);
-          } else if (r < 0.77) {
-            say(pick(WAVES, lastLine.current), { mood: 'wave', speak: false });
-          } else if (r < 0.9) {
-            say(pick(IDLE_CHATTER, lastLine.current), { speak: false });
-          } else {
-            say(pick(IDLE_THOUGHTS, lastLine.current), { mood: 'ponder', speak: false, hold: 3500 });
-          }
+          } else if (r < 0.55) move(pickX(0.85), 'fly', 1900, -0.09);
+          else if (r < 0.66) say(pick(WAVES, lastLine.current), { mood: 'wave', speak: false });
+          else if (r < 0.78) say(pick(IDLE_CHATTER, lastLine.current), { speak: false });
+          else if (r < 0.88) say(pick(IDLE_THOUGHTS, lastLine.current), { mood: 'ponder', speak: false, hold: 3500 });
+          else joke();
         }
         tick();
       }, 5000 + Math.random() * 4500);
     };
     tick();
     return () => window.clearTimeout(id);
-  }, [calm, say, setMood]);
+  }, [calm, say, act, setMood]);
+
+  // While he stands guard next to you, a steady word now and then.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!comfortRef.current || soberRef.current || document.visibilityState !== 'visible' || moodRef.current !== 'idle') return;
+      say(pick(GUARD_LINES, lastLine.current), { speak: false, hold: 5000 });
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [say]);
 
   // No touch or key for a while: he dozes off. Any touch, tap or key wakes him.
   useEffect(() => {
@@ -405,7 +568,7 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     const events = ['pointerdown', 'keydown', 'touchstart'] as const;
     events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
     const id = window.setInterval(() => {
-      if (document.visibilityState !== 'visible' || moodRef.current !== 'idle' || soberRef.current) return;
+      if (document.visibilityState !== 'visible' || moodRef.current !== 'idle' || soberRef.current || comfortRef.current) return;
       if (Date.now() - lastActive.current < SLEEP_AFTER_MS) return;
       stopTalk();
       setBubble('Zzz…');
@@ -421,13 +584,16 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   useEffect(
     () => () => {
       stopTalk();
+      stopEaves();
       clearTimer(soberTimer);
+      clearTimer(comfortTimer);
     },
-    [stopTalk],
+    [stopEaves, stopTalk],
   );
 
   return {
-    mood, bubble, x, y, flip, walkMs, calm, voice, quiet,
-    say, act, listening, stopListening, thinking, talkReply, finishTalk, poke, settle, sober, toggleCalm, toggleVoice,
+    mood, bubble, x, y, flip, walkMs, calm, voice, quiet, comfort, away, eavesdrop,
+    say, act, setAway, setComfort, react, listening, stopListening, thinking, talkReply, finishTalk,
+    poke, settle, sober, toggleCalm, toggleVoice,
   };
 }
