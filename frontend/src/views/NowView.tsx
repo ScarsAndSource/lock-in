@@ -6,6 +6,8 @@ import { DEMO_RHYTHM } from '../api/companion';
 import { DayOrbit } from '../components/DayOrbit';
 import { NextCard } from '../components/NextCard';
 import { GentlePrompt } from '../components/growth/GentlePrompt';
+import { JourneyNudge } from '../components/journey/JourneyNudge';
+import { useJourney } from '../hooks/useJourney';
 import { HabitChecklist } from '../components/HabitChecklist';
 import { TaskList } from '../components/TaskList';
 import { QuickAdd } from '../components/QuickAdd';
@@ -24,6 +26,7 @@ function deviceMinute(): number {
 export const NowView: React.FC = () => {
   const { activeDate, checkinView, demoMode } = useApp();
   const { focus, reload } = useTaskFocus();
+  const { stage, benched, setShowAll } = useJourney();
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(NONE);
   const { data: companion, refresh } = useCompanion(skipped);
 
@@ -33,7 +36,7 @@ export const NowView: React.FC = () => {
   }, [reload, refresh]);
   const onSkip = useCallback((key: string) => setSkipped((prev) => new Set(prev).add(key)), []);
 
-  const entries = (checkinView?.entries ?? []).filter((e) => e.is_scheduled !== false);
+  const entries = (checkinView?.entries ?? []).filter((e) => e.is_scheduled !== false && !benched.has(e.habit_id));
   const confirmed = checkinView?.already_confirmed ?? false;
   const localTotal = entries.length;
   const localDone = entries.filter((e) => e.status !== null && e.status !== 'skipped' && (!e.is_default || confirmed)).length;
@@ -43,30 +46,38 @@ export const NowView: React.FC = () => {
 
   return (
     <div className="flex flex-col w-full pb-24 max-w-md mx-auto space-y-4 animate-fadeIn">
-      <DayOrbit
-        rhythm={companion?.rhythm ?? (demoMode ? DEMO_RHYTHM : null)}
-        localMinute={companion?.local_minute ?? deviceMinute()}
-        heading={formatDayHeading(activeDate)}
-        done={companion?.habits_done ?? localDone}
-        total={companion?.habits_total ?? localTotal}
-        isDemo={demoMode}
-      />
+      {stage >= 1 && (
+        <DayOrbit
+          rhythm={companion?.rhythm ?? (demoMode ? DEMO_RHYTHM : null)}
+          localMinute={companion?.local_minute ?? deviceMinute()}
+          heading={formatDayHeading(activeDate)}
+          done={companion?.habits_done ?? localDone}
+          total={companion?.habits_total ?? localTotal}
+          isDemo={demoMode}
+        />
+      )}
 
       <NextCard companion={companion} focus={focus} skipped={skipped} onSkip={onSkip} reloadAll={reloadAll} />
 
-      <GentlePrompt />
+      {stage >= 2 && <JourneyNudge />}
+      {stage >= 3 && <GentlePrompt />}
 
       {(hasHabits || hasTasks || checkinView) && (
         <section className="w-full bg-surface rounded-xl px-4 py-3 border border-line [&>*+*]:border-t [&>*+*]:border-line [&>*+*]:mt-3 [&>*+*]:pt-3">
           <HabitChecklist />
-          <TaskList focus={focus} reload={reloadAll} />
+          {stage >= 1 && <TaskList focus={focus} reload={reloadAll} />}
         </section>
       )}
 
-      <QuickAdd onAdded={reloadAll} />
-      <InferenceChip />
-      <StatusChips />
-      <SevenDayWeave />
+      {stage >= 1 && <QuickAdd onAdded={reloadAll} />}
+      {stage >= 2 && <InferenceChip />}
+      {stage >= 2 && <StatusChips />}
+      {stage >= 2 && <SevenDayWeave />}
+      {stage < 4 && !demoMode && (
+        <button type="button" onClick={() => setShowAll(true)} className="self-center font-caption text-caption text-muted-text underline">
+          Show everything
+        </button>
+      )}
     </div>
   );
 };

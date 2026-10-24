@@ -24,6 +24,7 @@ from app.deps import (  # noqa: E402
     get_subject_repository, get_urge_repository,
     get_companion_repository, get_notification_repository, get_task_repository,
 )
+from app.deps import get_journey_service  # noqa: E402
 from app.main import app  # noqa: E402
 from app.security import FieldEncryptor, get_current_user_id, get_field_encryptor  # noqa: E402
 from app.services.insights_service import InsightsService  # noqa: E402
@@ -64,6 +65,16 @@ class FakeLLMClient:
         if not self.replies:
             raise LLMError("No canned reply configured.")
         return self.replies.pop(0)
+
+
+class _NoJourney:
+    """Existing API tests don't know about seasons: the habit gate is a no-op for them (rules are tested purely)."""
+
+    async def gate_new_habit(self, user_id) -> None:
+        return None
+
+    async def adopt_habit(self, user_id, habit_id) -> None:
+        return None
 
 
 class ApiWorld:
@@ -120,6 +131,7 @@ class ApiWorld:
         app.dependency_overrides[get_intention_repository] = lambda: self.intention_repo
         app.dependency_overrides[get_field_encryptor] = lambda: self.encryptor
         app.dependency_overrides[get_clock] = lambda: self._clock
+        app.dependency_overrides[get_journey_service] = lambda: _NoJourney()
         app.dependency_overrides[get_llm_client] = lambda: self.llm
         app.dependency_overrides[get_insights_service] = lambda: InsightsService(self.insight_repo, clock=self._clock)
 

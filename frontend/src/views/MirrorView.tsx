@@ -9,8 +9,10 @@ import { InsightsFeed } from '../components/InsightsFeed';
 import { getActiveMission } from '../api/profile';
 import type { MissionDetail } from '../types';
 import { MIRROR_SECTION_KEY } from '../api/growth';
+import { useJourney } from '../hooks/useJourney';
 
 const GrowthPanel = lazy(() => import('../components/growth/GrowthPanel').then((m) => ({ default: m.GrowthPanel })));
+const JourneyPanel = lazy(() => import('../components/journey/JourneyPanel').then((m) => ({ default: m.JourneyPanel })));
 
 const DOMAIN_TILES: { key: DomainKey; label: string; dot: string }[] = [
   { key: 'habits', label: 'Habits', dot: 'bg-domain-habits-fill' },
@@ -113,13 +115,15 @@ const MirrorOverview: React.FC = () => {
   );
 };
 
-type Section = 'overview' | 'growth';
+type Section = 'overview' | 'growth' | 'journey';
 
-/** Mirror has two sub-tabs: the existing review screen untouched, and Growth for the reflective extras. */
+/** Mirror sub-tabs: the review screen untouched, Growth for reflective extras, Journey for seasons and the shelf. */
 export const MirrorView: React.FC = () => {
+  const { stage } = useJourney();
   const [section, setSection] = useState<Section>(() => {
     try {
-      return sessionStorage.getItem(MIRROR_SECTION_KEY) === 'growth' ? 'growth' : 'overview';
+      const stored = sessionStorage.getItem(MIRROR_SECTION_KEY);
+      return stored === 'growth' || stored === 'journey' ? stored : 'overview';
     } catch {
       return 'overview';
     }
@@ -133,27 +137,38 @@ export const MirrorView: React.FC = () => {
     }
   }, []);
 
+  // Growth and Journey unlock at stage 3 (existing accounts and "show everything" start there).
+  const sections: Section[] = stage >= 3 ? ['overview', 'growth', 'journey'] : ['overview'];
+  const active: Section = sections.includes(section) ? section : 'overview';
+  const loading = <p className="py-10 text-center font-small text-muted-text">Loading…</p>;
+
   return (
     <div className="flex flex-col w-full max-w-md mx-auto space-y-4">
-      <div className="flex items-center bg-surface-container p-0.5 rounded-lg">
-        {(['overview', 'growth'] as Section[]).map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setSection(s)}
-            className={`flex-1 h-9 rounded font-caption text-caption capitalize transition-colors ${
-              section === s ? 'bg-ink text-ground-chalk font-semibold' : 'text-ink'
-            }`}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-      {section === 'overview' ? (
-        <MirrorOverview />
-      ) : (
-        <Suspense fallback={<p className="py-10 text-center font-small text-muted-text">Loading…</p>}>
+      {sections.length > 1 && (
+        <div className="flex items-center bg-surface-container p-0.5 rounded-lg">
+          {sections.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSection(s)}
+              className={`flex-1 h-9 rounded font-caption text-caption capitalize transition-colors ${
+                active === s ? 'bg-ink text-ground-chalk font-semibold' : 'text-ink'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+      {active === 'overview' && <MirrorOverview />}
+      {active === 'growth' && (
+        <Suspense fallback={loading}>
           <GrowthPanel />
+        </Suspense>
+      )}
+      {active === 'journey' && (
+        <Suspense fallback={loading}>
+          <JourneyPanel />
         </Suspense>
       )}
     </div>

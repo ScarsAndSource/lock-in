@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { logHabit } from '../api/habits';
+import { useJourney } from '../hooks/useJourney';
 import { BounceCard } from './BounceCard';
 import type { CheckinEntry, HabitStatus } from '../types';
 import { errorMessage, habitStatusLabel, habitTierOptions, tierHint } from '../lib/format';
@@ -49,10 +50,11 @@ export const HabitChecklist: React.FC = () => {
   const { checkinView, activeDate, bumpData, showToast, openDomain } = useApp();
   const [openId, setOpenId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  const { benched } = useJourney();
 
   if (!checkinView) return null;
   const confirmed = checkinView.already_confirmed;
-  const entries = checkinView.entries.filter((e) => e.is_scheduled !== false);
+  const entries = checkinView.entries.filter((e) => e.is_scheduled !== false && !benched.has(e.habit_id));
 
   const setStatus = async (entry: CheckinEntry, status: HabitStatus) => {
     setPending(entry.habit_id);

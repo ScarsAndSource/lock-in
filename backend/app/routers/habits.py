@@ -5,13 +5,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.deps import get_habits_service
+from app.deps import get_habits_service, get_journey_service
 from app.domain import TargetFrequency
 from app.ratelimit import rate_limit
 from app.routers.mappers import habit_out
 from app.schemas import HabitCreateRequest, HabitLogOut, HabitLogRequest, HabitOut, HabitPatchRequest
 from app.security import get_current_user_id
 from app.services.habits_service import HabitsService
+from app.services.journey_service import JourneyService
 
 router = APIRouter(prefix="/habits", tags=["habits"], dependencies=[Depends(rate_limit("api"))])
 
@@ -27,11 +28,14 @@ async def create_habit(
     body: HabitCreateRequest,
     user_id: UUID = Depends(get_current_user_id),
     service: HabitsService = Depends(get_habits_service),
+    journey: JourneyService = Depends(get_journey_service),
 ) -> HabitOut:
+    await journey.gate_new_habit(user_id)  # "not yet, finish these first" (409) when every focus slot is taken
     habit = await service.create_habit(
         user_id, body.name, _to_domain_frequency(body.target_frequency),
         floor_text=body.floor_text, stretch_text=body.stretch_text,
     )
+    await journey.adopt_habit(user_id, habit.id)
     return habit_out(habit)
 
 

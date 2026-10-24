@@ -44,6 +44,8 @@ from app.services.companion_service import CompanionService
 from app.repositories.growth_repository import SqlAlchemyGrowthRepository
 from app.services.goals_service import GoalsService
 from app.services.growth_service import GrowthService
+from app.repositories.journey_repository import SqlAlchemyJourneyRepository
+from app.services.journey_service import JourneyService
 from app.repositories.social_repository import SqlAlchemySocialRepository
 from app.services.crew_service import CrewService
 from app.services.habits_service import HabitsService
@@ -521,6 +523,23 @@ def get_growth_service(
 ) -> GrowthService:
     return GrowthService(
         SqlAlchemyGrowthRepository(session), encryptor, profiles, stats, habit_repo, habits, intentions, clock,
+    )
+
+
+# ---- journey (seasons, exam radar, life snapshot, graduation shelf)
+def get_journey_service(
+    session: AsyncSession = Depends(get_db),
+    encryptor: FieldEncryptor = Depends(get_field_encryptor),
+    profiles: ProfileService = Depends(get_profile_service),
+    stats: StatsService = Depends(get_stats_service),
+    habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    habits: HabitsService = Depends(get_habits_service),
+    pauses: PausesService = Depends(get_pauses_service),
+    calendar: CalendarService = Depends(get_calendar_service),
+    clock: Clock = Depends(get_clock),
+) -> JourneyService:
+    return JourneyService(
+        SqlAlchemyJourneyRepository(session), encryptor, profiles, stats, habit_repo, habits, pauses, calendar, clock,
     )
 
 
