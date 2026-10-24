@@ -37,10 +37,10 @@ from app.services.nudge_policy import PushMessage, in_quiet_hours
 from app.services.risk_windows import RiskWindow
 from app.services.task_time import at_local
 
-COMPANION_KINDS = ("checkin", "habit", "risk", "winddown", "study", "morning", "comeback")
+COMPANION_KINDS = ("checkin", "habit", "risk", "winddown", "study", "morning", "comeback", "crew_sunday", "crew_boost", "crew_buddy")
 PLAN_CUE_KINDS = ("risk", "winddown", "study", "habit")   # kinds that can carry the person's own if-then plan
 RESOLVABLE_KINDS = ("checkin", "habit", "morning", "comeback")   # "acted" also when that day's check-in was confirmed
-DECLINABLE_KINDS = ("morning", "comeback")                # a "Not today" tap on these is a no: it counts as ignored
+DECLINABLE_KINDS = ("morning", "comeback", "crew_boost", "crew_buddy")                # a "Not today" tap on these is a no: it counts as ignored
 MORNING_AFTER_WAKE_MIN = 20               # the morning moment opens ~20 min after the usual wake time...
 MORNING_MAX_SHIFT_MIN = 4 * 60            # ...but never more than 4 h after quiet hours end (late risers still get one)
 MORNING_EARLIEST_MIN = 5 * 60             # with quiet hours switched off, never before 05:00
@@ -58,10 +58,10 @@ LONG_MUTE_AFTER_IGNORED, LONG_MUTE_DAYS = 6, 7
 RISK_LEAD, RISK_GRACE = timedelta(minutes=30), timedelta(minutes=15)
 WIND_LEAD, WIND_GRACE = timedelta(minutes=45), timedelta(minutes=-20)   # fires bed-45m .. bed-20m
 STUDY_BEHIND_RATIO = 0.6
-PRIORITY = {"risk": 90, "winddown": 80, "comeback": 78, "morning": 75, "checkin": 65, "habit": 60, "study": 50}
+PRIORITY = {"risk": 90, "winddown": 80, "comeback": 78, "morning": 75, "crew_buddy": 72, "crew_boost": 70, "checkin": 65, "habit": 60, "crew_sunday": 55, "study": 50}
 TTL_MINUTES = {
     "risk": 120, "winddown": 90, "checkin": 6 * 60, "habit": 4 * 60, "study": 4 * 60,
-    "morning": 4 * 60, "comeback": 12 * 60,
+    "morning": 4 * 60, "comeback": 12 * 60, "crew_sunday": 4 * 60, "crew_boost": 12 * 60, "crew_buddy": 12 * 60,
 }
 
 
@@ -113,6 +113,22 @@ class ComebackInfo:
     slip_streak: int = 0           # from bounce_back.BounceState
 
 
+@dataclass(frozen=True, slots=True)
+class CrewBoost:
+    """Someone in the crew sent 'could use a hello'. Carries no details, because none were ever given."""
+    boost_id: UUID
+    crew_id: UUID
+    from_username: str
+
+
+@dataclass(frozen=True, slots=True)
+class CrewBuddy:
+    """A buddy deal's miss count was reached: ask the OWNER whether to send their promised message."""
+    deal_id: UUID
+    buddy_username: str
+    armed_from: str                # ISO date; part of the push key so a handled prompt never repeats
+
+
 @dataclass(slots=True)
 class CompanionContext:
     now: datetime
@@ -135,6 +151,9 @@ class CompanionContext:
     fresh_insights: int = 0
     wake: time | None = None                       # typical wake time from REAL sleep logs (None: not enough yet)
     morning_pick: MorningPick | None = None
+    crew_sunday_week: str | None = None            # ISO Monday of the week whose Crew card is waiting on this person
+    crew_boost: CrewBoost | None = None
+    crew_buddy: CrewBuddy | None = None
     comeback: ComebackInfo | None = None           # set whenever the person is silent; the policy decides if to speak        # new insights generated TODAY by the daily pulse and not yet pushed
 
 
@@ -409,7 +428,41 @@ def _comeback(ctx: CompanionContext, local: datetime) -> PushMessage | None:
     )
 
 
-_BUILDERS = (_risk, _winddown, _comeback, _morning, _checkin, _habit, _study)
+def _crew_sunday(ctx: CompanionContext, local: datetime) -> PushMessage | None:
+    week = ctx.crew_sunday_week
+    if week is None:
+        return None
+    return _msg(
+        "crew_sunday", f"crew_sunday:{week}", "Crew Sunday", "Close your week to open your crew's card.",
+        (("open", "Open"), ("later", "Not now")), {"week": week}, "/?a=crew",
+    )
+
+
+def _crew_boost(ctx: CompanionContext, local: datetime) -> PushMessage | None:
+    b = ctx.crew_boost
+    if b is None:
+        return None
+    body = "Someone could use a hello." if ctx.prefs.discreet_push else f"@{b.from_username} could use a hello."
+    return _msg(
+        "crew_boost", f"crew_boost:{b.boost_id}", "Crew", body,
+        (("cheer", "Send a cheer"), ("later", "Not now")),
+        {"crew": str(b.crew_id), "to": b.from_username}, "/?a=crew",
+    )
+
+
+def _crew_buddy(ctx: CompanionContext, local: datetime) -> PushMessage | None:
+    b = ctx.crew_buddy
+    if b is None:
+        return None
+    title, body = ("Your promise", "Tap to decide.") if ctx.prefs.discreet_push else (
+        "Your promise", f"Send your message to @{b.buddy_username}? It's your call.")
+    return _msg(
+        "crew_buddy", f"crew_buddy:{b.deal_id}:{b.armed_from}", title, body,
+        (("send", "Send it"), ("later", "Not now")), {"deal": str(b.deal_id), "date": b.armed_from}, "/?a=crew",
+    )
+
+
+_BUILDERS = (_risk, _winddown, _comeback, _morning, _crew_buddy, _crew_boost, _checkin, _habit, _crew_sunday, _study)
 
 
 def plan_companion(ctx: CompanionContext) -> list[PushMessage]:

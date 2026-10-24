@@ -45,6 +45,9 @@ from app.services.push import PushSender
 from app.services.stats_service import StatsService
 from app.services.study_service import StudyService
 from app.services.tasks_service import TasksService
+from app.repositories.social_repository import SqlAlchemySocialRepository
+from app.services.crew_moments import CrewMoments
+from app.services.crew_service import CrewService
 
 
 class _NoLLM:
@@ -85,9 +88,11 @@ def build_stack(
     insight_repo = SqlAlchemyInsightRepository(session)
     # With no model the pulse still works: insights are stored with the deterministic statement (narrated=False).
     insights = InsightsService(insight_repo, stats, clock, llm=scoped(llm, "insight") if llm is not None else None)
+    social = SqlAlchemySocialRepository(session)
+    crew_service = CrewService(social, habit_repo, pause_repo, session_repo, profiles, clock)
     planner = CompanionPlanner(
         ledger, habit_repo, checkin_repo, urge_repo, sleep_repo, goal_repo, study, intentions, stats, pause_repo,
-        tasks=task_repo, insights=insight_repo,
+        tasks=task_repo, insights=insight_repo, crew=CrewMoments(social, crew_service),
     )
     ns = SimpleNamespace(planner=planner, ledger=ledger, profiles=profiles, insights=insights)
     ns.pulse = DailyPulse(ledger, checkin_repo, insights)
@@ -97,6 +102,7 @@ def build_stack(
     )
     ns.actions = ActionsService(
         ledger=ledger, tasks=tasks, checkins=checkins, habits=HabitsService(habit_repo, clock), profiles=profiles,
+        crew=crew_service,
         secret=secret, clock=clock,
     )
     if sender is not None:

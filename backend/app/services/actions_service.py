@@ -35,6 +35,7 @@ NOOP_ACTIONS = {"ok": "Nice. Go for it.", "later": "Okay, not now.", "open": "Op
 # kind -> actions that are real writes (anything in NOOP_ACTIONS is accepted for every kind)
 KIND_ACTIONS: dict[str, tuple[str, ...]] = {
     "task": ("done", "snooze"),
+    "crew_sunday": (), "crew_boost": ("cheer",), "crew_buddy": ("send",),   # tap targets for the crew pushes
     "checkin": ("lock", "rough"),
     "habit": ("done", "floor", "skip"),
     "comeback": ("floor",),                    # the one real write: log today's floor version of the offered habit
@@ -53,10 +54,11 @@ class ActionResult:
 class ActionsService:
     def __init__(
         self, *, ledger: CompanionRepository | None, tasks: TasksService, checkins: CheckinsService,
-        habits: HabitsService, profiles: ProfileService, secret: bytes, clock: Clock = utc_now,
+        habits: HabitsService, profiles: ProfileService, secret: bytes, clock: Clock = utc_now, crew=None,
     ):
         self._ledger, self._tasks, self._checkins, self._habits = ledger, tasks, checkins, habits
         self._profiles, self._secret, self._clock = profiles, secret, clock
+        self._crew = crew   # CrewService | None; only the push-token path wires it
 
     # ------------------------------------------------------------------ entry points
     async def run_token(self, token: str, action: str) -> ActionResult:
@@ -92,6 +94,8 @@ class ActionsService:
                 msg = await self._task(user_id, action, args)
             elif kind == "checkin":
                 msg = await self._checkin(user_id, action, args)
+            elif kind in ("crew_boost", "crew_buddy"):
+                msg = await self._crew_action(user_id, kind, action, args)
             elif kind in ("habit", "comeback"):
                 msg = await self._habit(user_id, action, args)
             else:
@@ -99,6 +103,22 @@ class ActionsService:
         except (NotFoundError, ValidationError) as exc:
             return ActionResult("failed", str(exc), kind, action)
         return ActionResult("done", msg, kind, action)
+
+    async def _crew_action(self, user_id: UUID, kind: str, action: str, args: dict) -> str:
+        from app.exceptions import ConflictError
+
+        if self._crew is None:
+            raise ValidationError("That isn't available here. Open the app.")
+        try:
+            if kind == "crew_boost" and action == "cheer":
+                await self._crew.send_cheer(self._uuid(args.get("crew"), "crew"), str(args.get("to", "")), "rooting")
+                return "Cheer sent."
+            if kind == "crew_buddy" and action == "send":
+                await self._crew.buddy_send(user_id, self._uuid(args.get("deal"), "deal"))
+                return "Sent."
+        except ConflictError as exc:
+            raise ValidationError(str(exc)) from exc
+        raise ValidationError(f"{kind} has no action {action!r}.")
 
     async def _task(self, user_id: UUID, action: str, args: dict) -> str:
         task_id = self._uuid(args.get("task_id"), "task")

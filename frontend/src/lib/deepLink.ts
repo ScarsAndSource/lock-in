@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 
 /** Where a notification tap lands: /?a=checkin, /?a=habit, /?a=tasks, /?a=plan, /?a=sleep, /?a=study, /?a=focus, /?a=comeback, /?a=insight, /?a=future */
-export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study' | 'focus' | 'comeback' | 'insight' | 'future';
+export type DeepLink = 'checkin' | 'habit' | 'tasks' | 'plan' | 'sleep' | 'study' | 'focus' | 'comeback' | 'insight' | 'future' | 'crew';
 const KNOWN: ReadonlySet<string> = new Set([
-  'checkin', 'habit', 'tasks', 'plan', 'sleep', 'study', 'focus', 'comeback', 'insight', 'future',
+  'checkin', 'habit', 'tasks', 'plan', 'sleep', 'study', 'focus', 'comeback', 'insight', 'future', 'crew',
 ]);
 
 export interface DeepLinkParams {

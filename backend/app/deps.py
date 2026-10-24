@@ -44,6 +44,8 @@ from app.services.companion_service import CompanionService
 from app.repositories.growth_repository import SqlAlchemyGrowthRepository
 from app.services.goals_service import GoalsService
 from app.services.growth_service import GrowthService
+from app.repositories.social_repository import SqlAlchemySocialRepository
+from app.services.crew_service import CrewService
 from app.services.habits_service import HabitsService
 from app.services.insights_service import InsightsService
 from app.services.intentions_service import IntentionsService
@@ -520,3 +522,15 @@ def get_growth_service(
     return GrowthService(
         SqlAlchemyGrowthRepository(session), encryptor, profiles, stats, habit_repo, habits, intentions, clock,
     )
+
+
+# ---- crew (social layer)
+def get_crew_service(
+    session: AsyncSession = Depends(get_db),
+    habit_repo: SqlAlchemyHabitRepository = Depends(get_habit_repository),
+    pauses: SqlAlchemyPauseRepository = Depends(get_pause_repository),
+    study: SqlAlchemyStudySessionRepository = Depends(get_study_session_repository),
+    profiles: ProfileService = Depends(get_profile_service),
+    clock: Clock = Depends(get_clock),
+) -> CrewService:
+    return CrewService(SqlAlchemySocialRepository(session), habit_repo, pauses, study, profiles, clock)

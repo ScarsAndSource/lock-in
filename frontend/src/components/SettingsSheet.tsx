@@ -5,6 +5,7 @@ import { Disclosure } from './Disclosure';
 import { NotificationSettings } from './NotificationSettings';
 import { CalendarImport } from './CalendarImport';
 import { AutomationsSettings } from './AutomationsSettings';
+import { CrewPanel } from './crew/CrewPanel';
 import {
   getProfile,
   patchProfile,
@@ -172,6 +173,10 @@ export const SettingsSheet: React.FC = () => {
 
         <Disclosure title="Automations" summary="Sleep, hands-free">
           <AutomationsSettings />
+        </Disclosure>
+
+        <Disclosure title="Crew" summary="Small groups, no rankings" defaultOpen={sessionStorage.getItem('lockin_crew') === '1'}>
+          <CrewPanel />
         </Disclosure>
 
         <Disclosure title="If-then plans" summary={`${intentions.length} active`}>

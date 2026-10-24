@@ -19,7 +19,7 @@ from app.routers import calendar as calendar_router
 from app.routers import (
     actions, chat, chat_actions, companion, experiments, inference, ingest, chat_threads, checkins, goals, habits, insights, intentions, missions, mood, notifications,
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
-    study, support, tasks, urges, growth,
+    study, support, tasks, urges, growth, crew,
 )
 from app.schema_check import check_schema
 
@@ -175,6 +175,6 @@ for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
     study, urges, goals, intentions, chat, chat_threads, support, pauses, pause_shortcuts,
     tasks, notifications, mood, actions, chat_actions, ingest, companion, experiments, inference, calendar_router,
-    growth,
+    growth, crew,
 ):
     app.include_router(module.router)

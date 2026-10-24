@@ -63,13 +63,14 @@ class CompanionPlanner:
         self, ledger: CompanionRepository, habits: HabitRepository, checkins: CheckinRepository,
         urges: UrgeRepository, sleep: SleepRepository, goals: GoalRepository, study: StudyService,
         intentions: IntentionsService, stats: StatsService, pauses,
-        tasks: TaskRepository | None = None, bounce_enabled: bool = True, insights=None,
+        tasks: TaskRepository | None = None, bounce_enabled: bool = True, insights=None, crew=None,
     ):
         self._ledger, self._habits, self._checkins, self._urges = ledger, habits, checkins, urges
         self._sleep, self._goals, self._study = sleep, goals, study
         self._intentions, self._stats, self._pauses = intentions, stats, pauses
         self._tasks, self._bounce_enabled = tasks, bounce_enabled   # no task repo: the morning push is habit-only
         self._insights = insights
+        self._crew = crew   # services.crew_moments.CrewMoments | None
 
     async def plan(
         self, user_id, now: datetime, prefs: NotificationPrefs, tz: ZoneInfo, paused: bool,
@@ -138,6 +139,9 @@ class CompanionPlanner:
 
         # ---- morning / comeback: one window, one push; a person who went quiet gets the comeback, not the morning
         await self._load_morning(ctx, user_id, local, domains, sent)
+
+        if self._crew is not None:
+            await self._crew.load(ctx, user_id, local, sent)
 
         return cp.plan_companion(ctx)
 

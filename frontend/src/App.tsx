@@ -62,6 +62,10 @@ export const AppContent: React.FC = () => {
       case 'insight':
         setActiveTab('mirror');
         break;
+      case 'crew':
+        sessionStorage.setItem('lockin_crew', '1');
+        setSettingsOpen(true);
+        break;
       case 'future':
         if (params?.id) setFutureId(params.id);
         break;
