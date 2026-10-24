@@ -29,6 +29,13 @@
 @keyframes mr-ponder { 0%, 100% { transform: rotate(-3deg) translateY(0); } 50% { transform: rotate(-5deg) translateY(-1%); } }
 @keyframes mr-arm-ponder { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(-16deg); } }
 
+/* eavesdrop: leaning toward your text, hand cupped behind his ear */
+.m-eavesdrop .mr-float { animation: mr-eaves 1.8s ease-in-out infinite; }
+.m-eavesdrop .mr-arm { animation: mr-arm-eaves 1.8s ease-in-out infinite; }
+.m-eavesdrop .mr-tail { animation-duration: 3s; }
+@keyframes mr-eaves { 0%, 100% { transform: rotate(-4deg) translateY(0); } 50% { transform: rotate(-7deg) translateY(-1%); } }
+@keyframes mr-arm-eaves { 0%, 100% { transform: rotate(-50deg); } 50% { transform: rotate(-44deg); } }
+
 /* talking: mouth flaps, gada gestures along */
 .m-talking .mr-arm { animation: mr-arm-talk 1.1s ease-in-out infinite; }
 .m-talking .mr-mouth { animation: mr-talk 0.38s linear infinite; }
@@ -38,6 +45,45 @@
 /* listening: leans in */
 .m-listening .mr-float { animation: mr-listen 1.8s ease-in-out infinite; }
 @keyframes mr-listen { 0%, 100% { transform: rotate(-2deg) translateY(0); } 50% { transform: rotate(-3.2deg) translateY(-1.5%); } }
+
+/* laugh: shaking with laughter, mouth wide open, slapping his knee */
+.m-laugh .mr-float { animation: mr-laugh 0.28s ease-in-out infinite; }
+.m-laugh .mr-mouth { animation: mr-talk 0.22s linear infinite; }
+.m-laugh .mr-arm { animation: mr-arm-slap 0.28s ease-in-out infinite alternate; }
+.m-laugh .mr-eyes-closed, .m-rofl .mr-eyes-closed { animation: none; opacity: 0; }
+.m-laugh .mr-eyes-happy, .m-rofl .mr-eyes-happy { opacity: 1; }
+@keyframes mr-laugh { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-2.5%) rotate(2deg); } }
+@keyframes mr-arm-slap { from { transform: rotate(8deg); } to { transform: rotate(22deg); } }
+
+/* rofl: rolling on the floor laughing */
+.m-rofl .mr-float { transform-origin: 50% 58%; animation: mr-rofl 1.1s linear infinite; }
+.m-rofl .mr-mouth { animation: mr-talk 0.22s linear infinite; }
+.m-rofl .mr-arm { animation: mr-arm-slap 0.28s ease-in-out infinite alternate; }
+@keyframes mr-rofl { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
+
+/* sad: head down, gada drooping, slow long blinks */
+.m-sad .mr-float { animation: mr-sad 3.6s ease-in-out infinite; }
+.m-sad .mr-arm { animation: mr-arm-sad 3.6s ease-in-out infinite; }
+.m-sad .mr-tail { animation-duration: 6s; }
+.m-sad .mr-eyes-closed { animation: mr-sad-blink 3.6s ease-in-out infinite; }
+@keyframes mr-sad { 0%, 100% { transform: translateY(2%) rotate(-3deg); } 50% { transform: translateY(3%) rotate(-5deg); } }
+@keyframes mr-arm-sad { 0%, 100% { transform: rotate(16deg); } 50% { transform: rotate(20deg); } }
+@keyframes mr-sad-blink { 0%, 35%, 100% { opacity: 0; } 45%, 65% { opacity: 1; } }
+
+/* strong: standing tall, gada planted, a golden aura. Used while he stands guard with you */
+.m-strong .mr-float { animation: mr-strong 3.2s ease-in-out infinite, mr-aura 2.4s ease-in-out infinite; }
+.m-strong .mr-arm { animation: mr-arm-strong 3.2s ease-in-out infinite; }
+.m-strong .mr-tail { animation-duration: 3.6s; }
+@keyframes mr-strong { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5%); } }
+@keyframes mr-arm-strong { 0%, 100% { transform: rotate(-30deg); } 50% { transform: rotate(-26deg); } }
+@keyframes mr-aura {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(255, 190, 60, 0.5)); }
+  50% { filter: drop-shadow(0 0 12px rgba(255, 190, 60, 0.85)); }
+}
+
+/* serious: perfectly still, slow blinks. After a support reply */
+.m-serious .mr-float, .m-serious .mr-arm, .m-serious .mr-tail { animation: none; }
+.m-serious .mr-eyes-closed { animation-duration: 7s; }
 
 /* cheer: hop, gada up, happy eyes */
 .m-cheer .mr-float { animation: mr-hop 0.7s ease-out 2; }
@@ -97,6 +143,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mr-float, .mr-body, .mr-tail, .mr-arm, .mr-eyes-closed, .mr-mouth { animation: none !important; }
-  .m-cheer .mr-eyes-happy, .m-wave .mr-eyes-happy { opacity: 1; }
+  .m-cheer .mr-eyes-happy, .m-wave .mr-eyes-happy, .m-laugh .mr-eyes-happy, .m-rofl .mr-eyes-happy { opacity: 1; }
   .m-sleep .mr-eyes-closed { opacity: 1; }
 }
