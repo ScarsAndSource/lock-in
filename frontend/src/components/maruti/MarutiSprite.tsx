@@ -12,19 +12,21 @@ interface MarutiSpriteProps {
   className?: string;
   /** The in-page Maruti (hero or strip). The roaming overlay flies out of it and lands back on it. */
   home?: boolean;
+  /** Standing on the ground (or a tree): no cloud under him. */
+  ground?: boolean;
 }
 
 /**
  * Maruti on his cloud, built from separate pixel layers so the gada arm, tail, eyes and mouth move on their own.
  * Draw order: cloud, tail, body, gada arm, then the blink / happy-eyes / open-mouth overlays.
  */
-export const MarutiSprite: React.FC<MarutiSpriteProps> = ({ mood, flip = false, onTap, className = '', home = false }) => (
+export const MarutiSprite: React.FC<MarutiSpriteProps> = ({ mood, flip = false, onTap, className = '', home = false, ground = false }) => (
   <button
     type="button"
     onClick={onTap}
     aria-label={`${BUDDY_NAME}. Tap to say hi`}
     data-maruti-home={home ? '' : undefined}
-    className={`mr m-${mood} ${flip ? 'mr-flip' : ''} ${className}`}
+    className={`mr m-${mood} ${flip ? 'mr-flip' : ''} ${ground ? 'mr-ground' : ''} ${className}`}
   >
     <span className="mr-float">
       <img className="mr-layer mr-cloud" src={layer('cloud')} alt="" draggable={false} />

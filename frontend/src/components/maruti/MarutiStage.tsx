@@ -1,6 +1,7 @@
 import React from 'react';
 import { BUDDY_NAME } from '../Buddy';
 import { MarutiSprite } from './MarutiSprite';
+import { MarutiActor, MarutiProps, WORLD_CHIPS, useMarutiWorld } from './MarutiWorld';
 import { shownMood } from './useMarutiBrain';
 import type { MarutiBrain } from './useMarutiBrain';
 
@@ -39,34 +40,56 @@ export const MarutiControls: React.FC<{ brain: MarutiBrain; className?: string }
 );
 
 /**
- * Empty chat: Maruti on the hillside, strolling, hovering, joking and rolling with laughter. Tap him.
- * While the roaming overlay is him (flying, eavesdropping, standing guard) this sprite hides and its bubble moves with him.
+ * Empty chat: Maruti lives on the hillside. He walks the path, climbs the trees, flies, swings on a vine, prays at the
+ * temple, meditates, waters his sapling and more. Tap the sky to fly him there, a tree to climb it, the ground to call him,
+ * or use the buttons. While the roaming overlay is him (flying across the screen, eavesdropping, standing guard) he hides here.
  */
-export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
-  <div className="space-y-2">
-    <div className="relative w-full overflow-hidden rounded-2xl border border-line" style={{ aspectRatio: '1024 / 559' }}>
-      <img src="/buddy/maruti-stage.webp" alt="" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => {
+  const { world, canMove, start, tapStage } = useMarutiWorld(brain);
+
+  const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return;
+    tapStage(((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100);
+  };
+
+  return (
+    <div className="space-y-2">
       <div
-        className="absolute"
-        style={{
-          left: '34.375%', top: '8.587%', width: '34.57%', height: '81.22%',
-          transform: `translate(${brain.x * 100}%, ${brain.y * 100}%)`, transition: `transform ${brain.walkMs}ms ease-in-out`,
-        }}
+        role="presentation"
+        onClick={onStageClick}
+        className="relative w-full overflow-hidden rounded-2xl border border-line"
+        style={{ aspectRatio: '1024 / 559' }}
       >
-        <MarutiSprite
-          home
-          mood={shownMood(brain)}
-          flip={brain.flip}
-          onTap={brain.poke}
-          className={brain.away ? 'invisible' : ''}
-        />
+        <img src="/buddy/maruti-stage.webp" alt="" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+        <MarutiProps world={world} />
+        <MarutiActor brain={brain} world={world} onTap={brain.poke} />
+        {brain.bubble && !brain.away && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%] z-10" />}
+        <MarutiControls brain={brain} className="absolute right-2 top-2 z-10" />
       </div>
-      {brain.bubble && !brain.away && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%]" />}
-      <MarutiControls brain={brain} className="absolute right-2 top-2" />
+      <div className="flex gap-1.5 overflow-x-auto pb-1" aria-label={`Ask ${BUDDY_NAME} to do something`}>
+        {WORLD_CHIPS.map((chip) => (
+          <button
+            key={chip.label}
+            type="button"
+            disabled={!canMove}
+            onClick={() => start(chip.run)}
+            className="shrink-0 whitespace-nowrap rounded-full bg-surface border border-line text-ink px-3 py-1 font-caption text-caption disabled:opacity-40"
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+      <p className="font-section text-section text-ink">Hey, I’m {BUDDY_NAME}.</p>
+      <p className="font-caption text-caption text-muted-text">
+        {canMove
+          ? 'Tap the sky to fly him there, a tree to climb it, the path to call him.'
+          : `${BUDDY_NAME} is keeping still right now.`}
+      </p>
     </div>
-    <p className="font-section text-section text-ink">Hey, I’m {BUDDY_NAME}.</p>
-  </div>
-);
+  );
+};
 
 /** Once a chat has messages Maruti shrinks to a strip above them: still reacting, never in the way. */
 export const MarutiStrip: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (

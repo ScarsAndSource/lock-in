@@ -146,3 +146,56 @@
   .m-cheer .mr-eyes-happy, .m-wave .mr-eyes-happy, .m-laugh .mr-eyes-happy, .m-rofl .mr-eyes-happy { opacity: 1; }
   .m-sleep .mr-eyes-closed { opacity: 1; }
 }
+
+/* ground: no cloud under him (walking, climbing, standing on the hillside). Climb and hang already hide it. */
+.mr-cloud { transition: opacity 0.25s ease; }
+.mr-ground .mr-cloud { opacity: 0; }
+
+/* full-body poses cut from the artwork: they share the stage with the layered Maruti */
+.mp { display: block; position: relative; width: 100%; padding: 0; border: 0; background: none; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
+.mp-flip { display: block; }
+.mp-flipped { transform: scaleX(-1); }
+.mp-img { display: block; width: 100%; height: auto; pointer-events: none; user-select: none; -webkit-user-drag: none;
+  transform-origin: 50% 100%; animation: mp-breathe 3.2s ease-in-out infinite; }
+.mp-fly-small, .mp-fly-gada-rock { animation: mp-hover 1.1s ease-in-out infinite; }
+.mp-lift-mountain { animation: mp-lift 0.9s ease-in-out infinite; }
+.mp-water-sapling { transform-origin: 30% 100%; animation: mp-pour 1.6s ease-in-out infinite; }
+.mp-meditate-rock, .mp-namaste-om { animation-duration: 4.4s; }
+@keyframes mp-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.012); } }
+@keyframes mp-hover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3%); } }
+@keyframes mp-lift { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.02, 0.975); } }
+@keyframes mp-pour { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-2.5deg); } }
+
+/* Om drifting up while he prays or meditates */
+.mp-om { position: absolute; top: -2%; font-size: 22px; line-height: 1; color: #f5b400; opacity: 0; pointer-events: none;
+  text-shadow: 0 0 6px rgba(255, 190, 60, 0.8); animation: mp-om 2.6s ease-out infinite; }
+@keyframes mp-om { 0% { opacity: 0; transform: translateY(0) scale(0.6); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-140%) scale(1.15); } }
+
+/* water drops from the can */
+.mp-drop { position: absolute; width: 3px; height: 6px; border-radius: 50%; background: #5aa9ff; opacity: 0; pointer-events: none;
+  animation: mp-drop 0.8s ease-in infinite; }
+@keyframes mp-drop { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(34px); } }
+
+/* the vine: hangs from above the stage and swings, slowing to a stop over 7s (see MarutiWorld.tsx) */
+.mv { position: absolute; left: 0; top: -1%; width: 100%; pointer-events: none; z-index: 4; animation: mv-swing 7s both; }
+.mv-line { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; border-radius: 2px;
+  background: repeating-linear-gradient(to bottom, #2d6a2d 0 8px, #3c8a38 8px 16px); box-shadow: 0 0 0 1px rgba(20, 50, 20, 0.45); }
+.mv-leaf { position: absolute; width: 12px; height: 7px; border-radius: 100% 0 100% 0; background: #4aa03f; border: 1px solid #2d6a2d; }
+.mv-leaf-l { margin-left: -13px; transform: rotate(-20deg); }
+.mv-leaf-r { margin-left: 1px; transform: scaleX(-1) rotate(-20deg); }
+@keyframes mv-swing {
+  0% { transform: rotate(0); animation-timing-function: ease-in-out; }
+  12% { transform: rotate(-26deg); animation-timing-function: ease-in-out; }
+  26% { transform: rotate(24deg); animation-timing-function: ease-in-out; }
+  40% { transform: rotate(-18deg); animation-timing-function: ease-in-out; }
+  54% { transform: rotate(14deg); animation-timing-function: ease-in-out; }
+  67% { transform: rotate(-9deg); animation-timing-function: ease-in-out; }
+  80% { transform: rotate(5deg); animation-timing-function: ease-in-out; }
+  92% { transform: rotate(-2deg); animation-timing-function: ease-in-out; }
+  100% { transform: rotate(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mp-img, .mp-om, .mp-drop, .mv { animation: none !important; }
+}

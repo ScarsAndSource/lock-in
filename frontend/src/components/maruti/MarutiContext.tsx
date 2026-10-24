@@ -1,5 +1,4 @@
 import React, { createContext, useContext } from 'react';
-import { useApp } from '../../context/AppContext';
 import { useMarutiBrain } from './useMarutiBrain';
 import type { MarutiBrain } from './useMarutiBrain';
 
@@ -7,8 +6,8 @@ const MarutiCtx = createContext<MarutiBrain | null>(null);
 
 /** One Maruti for the whole app: the chat tab and the roaming overlay share the same brain. */
 export const MarutiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { activeTab } = useApp();
-  const brain = useMarutiBrain(activeTab === 'companion');
+  // The hillside world (MarutiWorld) moves him now, so the brain's own wandering stays off.
+  const brain = useMarutiBrain(false);
   return <MarutiCtx.Provider value={brain}>{children}</MarutiCtx.Provider>;
 };
 
