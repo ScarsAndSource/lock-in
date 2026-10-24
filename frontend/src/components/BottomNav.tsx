@@ -2,10 +2,11 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import type { Tab } from '../context/AppContext';
 import { useCrew } from '../context/CrewContext';
+import { BUDDY_NAME, BuddyAvatar } from './Buddy';
 
 const NAV_ITEMS: { key: Tab; label: string; icon: string }[] = [
   { key: 'now', label: 'Now', icon: 'today' },
-  { key: 'companion', label: 'Companion', icon: 'chat_bubble_outline' },
+  { key: 'companion', label: BUDDY_NAME, icon: 'chat_bubble_outline' },
   { key: 'mirror', label: 'Mirror', icon: 'insights' },
   { key: 'crew', label: 'Crew', icon: 'group' },
 ];
@@ -34,7 +35,11 @@ export const BottomNav: React.FC = () => {
               }`}
             >
               <span className="relative">
-                <span className="material-symbols-outlined text-[22px] mb-0.5 block">{item.icon}</span>
+                {item.key === 'companion' ? (
+                  <BuddyAvatar size={26} className={`mb-0.5 block ${isActive ? 'ring-2 ring-ink' : 'opacity-90'}`} />
+                ) : (
+                  <span className="material-symbols-outlined text-[22px] mb-0.5 block">{item.icon}</span>
+                )}
                 {badge > 0 && (
                   <span
                     aria-hidden="true"

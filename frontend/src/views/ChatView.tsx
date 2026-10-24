@@ -5,6 +5,11 @@ import { fetchSupport } from '../api/support';
 import { SupportCard } from '../components/SupportCard';
 import { ActionCards } from '../components/ActionCards';
 import { VoiceButton } from '../components/VoiceButton';
+import { BUDDY_NAME, BuddyAvatar } from '../components/Buddy';
+import { MarutiHero, MarutiStrip } from '../components/maruti/MarutiStage';
+import { TypedText } from '../components/maruti/TypedText';
+import { useMarutiBrain } from '../components/maruti/useMarutiBrain';
+import { FAILED, GREETINGS, SUPPORT, dayPart, pick } from '../components/maruti/lines';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
@@ -12,13 +17,17 @@ const STARTERS = ['Why did I slip this week?', 'What is hurting my sleep?', 'Whi
 
 export const ChatView: React.FC = () => {
   const { showToast, profile } = useApp();
+  const brain = useMarutiBrain();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [support, setSupport] = useState<SupportPayload | null>(null);
+  const [typingId, setTypingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageCountRef = useRef(0);
+  messageCountRef.current = messages.length;
 
   useEffect(() => {
     getChatThreads()
@@ -55,11 +64,21 @@ export const ChatView: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, support]);
 
+  // Maruti greets you when the chat is empty (a returning chat with history stays quiet).
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      if (messageCountRef.current === 0) brain.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
+    }, 900);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const send = async (raw: string) => {
     const text = raw.trim();
     if (!text || isSending) return;
     setInputText('');
     setIsSending(true);
+    brain.thinking();
 
     try {
       const res = await sendMessage(text, activeThreadId || undefined);
@@ -78,7 +97,18 @@ export const ChatView: React.FC = () => {
         setActiveThreadId(res.thread.id);
         setThreads((prev) => [res.thread, ...prev]);
       }
+      if (res.reply.mode === 'support' || nextSupport) {
+        // A support reply is never animated, joked about or read aloud: Maruti stays still and points to the help.
+        brain.sober(true);
+        brain.say(pick(SUPPORT), { mood: 'idle', speak: false, hold: 9000 });
+      } else {
+        brain.sober(false);
+        setTypingId(res.reply.id);
+        brain.talkReply(res.reply.content);
+      }
     } catch (err: unknown) {
+      brain.settle();
+      brain.say(pick(FAILED), { mood: 'idle', speak: false });
       showToast(errorMessage(err, 'Error communicating with assistant'));
     } finally {
       setIsSending(false);
@@ -94,7 +124,18 @@ export const ChatView: React.FC = () => {
     setActiveThreadId(null);
     setMessages([]);
     setSupport(null);
+    setTypingId(null);
+    brain.sober(false);
+    brain.settle();
+    brain.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
   };
+
+  const onInput = (value: string) => {
+    setInputText(value);
+    if (value.trim() && !isSending) brain.listening();
+  };
+
+  const scrollToEnd = () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
 
   return (
     <div className="flex flex-col w-full h-[calc(100dvh-130px)] max-w-md mx-auto">
@@ -126,9 +167,12 @@ export const ChatView: React.FC = () => {
         </div>
       )}
 
+      {messages.length > 0 && <MarutiStrip brain={brain} />}
+
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2">
         {messages.length === 0 && (
-          <div className="py-10 space-y-4 text-center">
+          <div className="py-2 space-y-4 text-center">
+            <MarutiHero brain={brain} />
             <p className="font-small text-small text-muted-text max-w-xs mx-auto">
               Ask about your own week. Answers come from your logs, not guesses.
             </p>
@@ -148,38 +192,56 @@ export const ChatView: React.FC = () => {
           </div>
         )}
 
-        {messages.map((m) => (
-          <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-            <div
-              className={`max-w-[85%] rounded-2xl p-3.5 space-y-2 text-small leading-relaxed ${
-                m.role === 'user' ? 'bg-ink text-ground-chalk rounded-br-md' : 'bg-surface text-ink border border-line rounded-bl-md'
-              }`}
-            >
-              <p>{m.content}</p>
+        {messages.map((m) => {
+          const typing = m.id === typingId;
+          return (
+            <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`flex items-end gap-2 max-w-[92%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                {m.role !== 'user' && <BuddyAvatar />}
+                <div
+                  className={`rounded-2xl p-3.5 space-y-2 text-small leading-relaxed ${
+                    m.role === 'user' ? 'bg-ink text-ground-chalk rounded-br-md' : 'bg-surface text-ink border border-line rounded-bl-md'
+                  }`}
+                >
+                  {typing ? (
+                    <TypedText
+                      text={m.content}
+                      onProgress={scrollToEnd}
+                      onDone={() => {
+                        setTypingId(null);
+                        brain.finishTalk();
+                      }}
+                    />
+                  ) : (
+                    <p>{m.content}</p>
+                  )}
 
-              {m.next_step && (
-                <div className="p-2.5 bg-surface-container-low rounded-lg border border-surface-container text-ink font-caption text-caption">
-                  <span className="font-bold block uppercase tracking-wider text-[10px] text-muted-text mb-0.5">
-                    Next step
-                  </span>
-                  <span>{m.next_step}</span>
+                  {!typing && m.next_step && (
+                    <div className="p-2.5 bg-surface-container-low rounded-lg border border-surface-container text-ink font-caption text-caption">
+                      <span className="font-bold block uppercase tracking-wider text-[10px] text-muted-text mb-0.5">
+                        Next step
+                      </span>
+                      <span>{m.next_step}</span>
+                    </div>
+                  )}
+
+                  {!typing && m.actions && m.actions.length > 0 && <ActionCards cards={m.actions} />}
+
+                  {!typing && m.cited_days && m.cited_days.length > 0 && (
+                    <div className="font-caption text-[11px] text-muted-text pt-1">Based on: {m.cited_days.join(', ')}</div>
+                  )}
                 </div>
-              )}
-
-              {m.actions && m.actions.length > 0 && <ActionCards cards={m.actions} />}
-
-              {m.cited_days && m.cited_days.length > 0 && (
-                <div className="font-caption text-[11px] text-muted-text pt-1">Based on: {m.cited_days.join(', ')}</div>
-              )}
+              </div>
+              <span className="font-caption text-[10px] text-muted-text px-1 mt-1">
+                {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             </div>
-            <span className="font-caption text-[10px] text-muted-text px-1 mt-1">
-              {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-        ))}
+          );
+        })}
         {support && <SupportCard support={support} />}
         {isSending && (
           <div className="flex items-center gap-1.5 p-3 text-caption text-muted-text">
+            <BuddyAvatar size={28} bounce />
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce" />
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce [animation-delay:0.2s]" />
             <span className="w-1.5 h-1.5 rounded-full bg-ink animate-bounce [animation-delay:0.4s]" />
@@ -192,13 +254,13 @@ export const ChatView: React.FC = () => {
       <form onSubmit={handleSend} className="pt-2 shrink-0 flex items-center gap-2">
         <VoiceButton
           disabled={isSending}
-          onTranscript={(t) => setInputText((prev) => `${prev.trim() ? `${prev.trim()} ` : ''}${t}`)}
+          onTranscript={(t) => onInput(`${inputText.trim() ? `${inputText.trim()} ` : ''}${t}`)}
         />
         <input
           type="text"
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Ask about your week…"
+          onChange={(e) => onInput(e.target.value)}
+          placeholder={`Ask ${BUDDY_NAME} about your week…`}
           className="flex-1 h-12 bg-surface border border-line rounded-xl px-4 font-small text-ink focus:outline-none focus:ring-1 focus:ring-ink"
         />
         <button
