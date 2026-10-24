@@ -8,7 +8,7 @@ import { VoiceButton } from '../components/VoiceButton';
 import { BUDDY_NAME, BuddyAvatar } from '../components/Buddy';
 import { MarutiHero, MarutiStrip } from '../components/maruti/MarutiStage';
 import { TypedText } from '../components/maruti/TypedText';
-import { useMarutiBrain } from '../components/maruti/useMarutiBrain';
+import { useMaruti } from '../components/maruti/MarutiContext';
 import { FAILED, GREETINGS, SUPPORT, dayPart, pick } from '../components/maruti/lines';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
@@ -17,7 +17,9 @@ const STARTERS = ['Why did I slip this week?', 'What is hurting my sleep?', 'Whi
 
 export const ChatView: React.FC = () => {
   const { showToast, profile } = useApp();
-  const brain = useMarutiBrain();
+  const brain = useMaruti();
+  const brainRef = useRef(brain);
+  brainRef.current = brain;
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -64,13 +66,15 @@ export const ChatView: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, support]);
 
-  // Maruti greets you when the chat is empty (a returning chat with history stays quiet).
+  // Maruti greets you when the chat is empty and he has nothing else to say (a returning chat stays quiet).
   useEffect(() => {
     const id = window.setTimeout(() => {
-      if (messageCountRef.current === 0) brain.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
+      const b = brainRef.current;
+      if (messageCountRef.current === 0 && !b.bubble && b.mood === 'idle' && !b.quiet) {
+        b.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
+      }
     }, 900);
     return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const send = async (raw: string) => {
@@ -130,9 +134,11 @@ export const ChatView: React.FC = () => {
     brain.say(pick(GREETINGS[dayPart(new Date())]), { hold: 6000 });
   };
 
+  // Typing makes him think; clearing the box lets him relax again.
   const onInput = (value: string) => {
     setInputText(value);
-    if (value.trim() && !isSending) brain.listening();
+    if (!value.trim()) brain.stopListening();
+    else if (!isSending) brain.listening();
   };
 
   const scrollToEnd = () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });

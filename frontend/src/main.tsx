@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { AppProvider } from './context/AppContext';
 import { CrewProvider } from './context/CrewContext';
+import { MarutiProvider } from './components/maruti/MarutiContext';
 import { AppContent } from './App';
 import { startAuth } from './api/auth';
 import './index.css';
@@ -13,7 +14,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AppProvider>
       <CrewProvider>
-        <AppContent />
+        <MarutiProvider>
+          <AppContent />
+        </MarutiProvider>
       </CrewProvider>
     </AppProvider>
   </React.StrictMode>

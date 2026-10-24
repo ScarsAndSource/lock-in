@@ -17,10 +17,17 @@
 @keyframes mr-arm-idle { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(3deg); } }
 @keyframes mr-blink { 0%, 93%, 100% { opacity: 0; } 95%, 97% { opacity: 1; } }
 
-/* thinking: he twirls the gada while he looks through your logs */
+/* thinking (after you send): he twirls the gada while he looks through your logs */
 .m-thinking .mr-arm { animation: mr-arm-think 0.9s ease-in-out infinite; }
 .m-thinking .mr-tail { animation-duration: 1.1s; }
 @keyframes mr-arm-think { 0%, 100% { transform: rotate(-16deg); } 50% { transform: rotate(12deg); } }
+
+/* ponder (while you type): gada raised to the chin, head tilted, slow and calm */
+.m-ponder .mr-float { animation: mr-ponder 2.4s ease-in-out infinite; }
+.m-ponder .mr-arm { animation: mr-arm-ponder 2.4s ease-in-out infinite; }
+.m-ponder .mr-tail { animation-duration: 3.2s; }
+@keyframes mr-ponder { 0%, 100% { transform: rotate(-3deg) translateY(0); } 50% { transform: rotate(-5deg) translateY(-1%); } }
+@keyframes mr-arm-ponder { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(-16deg); } }
 
 /* talking: mouth flaps, gada gestures along */
 .m-talking .mr-arm { animation: mr-arm-talk 1.1s ease-in-out infinite; }
@@ -28,7 +35,7 @@
 @keyframes mr-arm-talk { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(8deg); } }
 @keyframes mr-talk { 0%, 100% { opacity: 0; } 15%, 45% { opacity: 1; } 60% { opacity: 0; } 75%, 88% { opacity: 1; } }
 
-/* listening: leans in while you type */
+/* listening: leans in */
 .m-listening .mr-float { animation: mr-listen 1.8s ease-in-out infinite; }
 @keyframes mr-listen { 0%, 100% { transform: rotate(-2deg) translateY(0); } 50% { transform: rotate(-3.2deg) translateY(-1.5%); } }
 
@@ -52,7 +59,44 @@
 @keyframes mr-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.4%); } }
 @keyframes mr-arm-walk { from { transform: rotate(-7deg); } to { transform: rotate(7deg); } }
 
+/* fly: gada thrust forward, tail whipping, leaning into the wind */
+.m-fly .mr-float { animation: mr-fly 0.9s ease-in-out infinite; }
+.m-fly .mr-arm { animation: mr-arm-fly 0.9s ease-in-out infinite alternate; }
+.m-fly .mr-tail { animation-duration: 0.35s; }
+@keyframes mr-fly { 0%, 100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-6%) rotate(-7deg); } }
+@keyframes mr-arm-fly { from { transform: rotate(-30deg); } to { transform: rotate(-42deg); } }
+
+/* climb / hang: no cloud, he grips the edge. Climb swings fast, hang rests with the gada raised */
+.m-climb .mr-cloud, .m-hang .mr-cloud { opacity: 0; }
+.m-climb .mr-float { animation: mr-bob 0.5s ease-in-out infinite; }
+.m-climb .mr-arm { animation: mr-arm-climb 0.5s ease-in-out infinite alternate; }
+.m-climb .mr-tail { animation-duration: 0.5s; }
+.m-hang .mr-float { animation: mr-hang 2.6s ease-in-out infinite; }
+.m-hang .mr-arm { animation: mr-arm-hang 2.6s ease-in-out infinite; }
+@keyframes mr-arm-climb { from { transform: rotate(-38deg); } to { transform: rotate(-8deg); } }
+@keyframes mr-hang { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(2%); } }
+@keyframes mr-arm-hang { 0%, 100% { transform: rotate(-36deg); } 50% { transform: rotate(-30deg); } }
+
+/* peek: curious little sway */
+.m-peek .mr-float { animation: mr-peek 1.8s ease-in-out infinite; }
+@keyframes mr-peek { 0%, 100% { transform: rotate(0) translateY(0); } 50% { transform: rotate(-2deg) translateY(-1%); } }
+
+/* wave: gada waving, happy eyes */
+.m-wave .mr-arm { animation: mr-arm-wave 0.45s ease-in-out infinite alternate; }
+.m-wave .mr-float { animation: mr-hop 0.7s ease-out 1; }
+.m-wave .mr-eyes-closed { animation: none; opacity: 0; }
+.m-wave .mr-eyes-happy { opacity: 1; }
+@keyframes mr-arm-wave { from { transform: rotate(-40deg); } to { transform: rotate(-14deg); } }
+
+/* sleep: eyes shut, slow breathing, gada resting */
+.m-sleep .mr-float { animation: mr-sleep 4s ease-in-out infinite; }
+.m-sleep .mr-arm { animation: none; transform: rotate(6deg); }
+.m-sleep .mr-tail { animation-duration: 6s; }
+.m-sleep .mr-eyes-closed { animation: none; opacity: 1; }
+@keyframes mr-sleep { 0%, 100% { transform: translateY(1%) rotate(2deg); } 50% { transform: translateY(2%) rotate(3deg); } }
+
 @media (prefers-reduced-motion: reduce) {
   .mr-float, .mr-body, .mr-tail, .mr-arm, .mr-eyes-closed, .mr-mouth { animation: none !important; }
-  .m-cheer .mr-eyes-happy { opacity: 1; }
+  .m-cheer .mr-eyes-happy, .m-wave .mr-eyes-happy { opacity: 1; }
+  .m-sleep .mr-eyes-closed { opacity: 1; }
 }

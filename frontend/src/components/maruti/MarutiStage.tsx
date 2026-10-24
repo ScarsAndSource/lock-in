@@ -37,7 +37,7 @@ export const MarutiControls: React.FC<{ brain: MarutiBrain; className?: string }
   </div>
 );
 
-/** Empty chat: Maruti on the hillside, strolling, twirling the gada and greeting you. Tap him. */
+/** Empty chat: Maruti on the hillside, strolling, flying, waving and greeting you. Tap him. */
 export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
   <div className="space-y-2">
     <div className="relative w-full overflow-hidden rounded-2xl border border-line" style={{ aspectRatio: '1024 / 559' }}>
@@ -46,7 +46,7 @@ export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => (
         className="absolute"
         style={{
           left: '34.375%', top: '8.587%', width: '34.57%', height: '81.22%',
-          transform: `translateX(${brain.x * 100}%)`, transition: `transform ${brain.walkMs}ms ease-in-out`,
+          transform: `translate(${brain.x * 100}%, ${brain.y * 100}%)`, transition: `transform ${brain.walkMs}ms ease-in-out`,
         }}
       >
         <MarutiSprite mood={brain.mood} flip={brain.flip} onTap={brain.poke} />
