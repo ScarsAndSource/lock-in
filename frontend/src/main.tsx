@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { AppProvider } from './context/AppContext';
+import { CrewProvider } from './context/CrewContext';
 import { AppContent } from './App';
 import { startAuth } from './api/auth';
 import './index.css';
@@ -11,7 +12,9 @@ startAuth();
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AppProvider>
-      <AppContent />
+      <CrewProvider>
+        <AppContent />
+      </CrewProvider>
     </AppProvider>
   </React.StrictMode>
 );

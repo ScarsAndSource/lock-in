@@ -6,7 +6,7 @@ import { CheckinView, Profile } from '../types';
 import { localTodayISO } from '../lib/dates';
 import { errorMessage } from '../lib/format';
 
-export type Tab = 'now' | 'companion' | 'mirror';
+export type Tab = 'now' | 'companion' | 'mirror' | 'crew';
 export type DomainKey = 'habits' | 'sleep' | 'screen' | 'study' | 'urges' | 'pauses';
 
 interface AppContextType {

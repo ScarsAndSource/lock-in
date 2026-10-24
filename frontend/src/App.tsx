@@ -13,12 +13,13 @@ import { useDeepLink } from './lib/deepLink';
 const NowView = lazy(() => import('./views/NowView').then((m) => ({ default: m.NowView })));
 const ChatView = lazy(() => import('./views/ChatView').then((m) => ({ default: m.ChatView })));
 const MirrorView = lazy(() => import('./views/MirrorView').then((m) => ({ default: m.MirrorView })));
+const CrewView = lazy(() => import('./views/CrewView').then((m) => ({ default: m.CrewView })));
 const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })));
 const DomainSheet = lazy(() => import('./components/DomainSheet').then((m) => ({ default: m.DomainSheet })));
 const TriageSheet = lazy(() => import('./components/TriageSheet').then((m) => ({ default: m.TriageSheet })));
 const FutureSelfPlayer = lazy(() => import('./components/growth/FutureSelfPlayer').then((m) => ({ default: m.FutureSelfPlayer })));
 
-const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror' } as const;
+const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror', crew: 'Crew' } as const;
 
 export const AppContent: React.FC = () => {
   const {
@@ -63,8 +64,7 @@ export const AppContent: React.FC = () => {
         setActiveTab('mirror');
         break;
       case 'crew':
-        sessionStorage.setItem('lockin_crew', '1');
-        setSettingsOpen(true);
+        setActiveTab('crew');
         break;
       case 'future':
         if (params?.id) setFutureId(params.id);
@@ -88,6 +88,7 @@ export const AppContent: React.FC = () => {
           {activeTab === 'now' && <NowView />}
           {activeTab === 'companion' && <ChatView />}
           {activeTab === 'mirror' && <MirrorView />}
+          {activeTab === 'crew' && <CrewView />}
         </Suspense>
       </main>
 
