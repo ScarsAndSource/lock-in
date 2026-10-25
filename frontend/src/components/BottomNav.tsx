@@ -33,7 +33,7 @@ export const BottomNav: React.FC = () => {
                 onClick={() => setActiveTab(item.key)}
                 className={`relative flex-1 flex flex-col items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${
                   isActive
-                    ? "text-ink font-body-medium before:content-[''] before:absolute before:top-0 before:inset-x-0 before:h-[3px] before:bg-ink"
+                    ? "text-ink font-body-medium before:content-[''] before:absolute before:top-0 before:inset-x-3 before:h-[3px] before:rounded-full before:bg-gradient-to-r before:from-[#E8A84F] before:to-[#F0B080]"
                     : 'text-muted-text hover:text-ink'
                 }`}
               >

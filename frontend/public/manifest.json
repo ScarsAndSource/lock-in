@@ -4,8 +4,8 @@
   "description": "A companion for habits, sleep, study and the urges you are working on",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F8F1E7",
-  "theme_color": "#261E18",
+  "background_color": "#EAF1FA",
+  "theme_color": "#262B36",
   "icons": [
     {
       "src": "/favicon.svg",
