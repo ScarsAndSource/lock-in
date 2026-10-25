@@ -40,12 +40,14 @@ export const MarutiControls: React.FC<{ brain: MarutiBrain; className?: string }
 );
 
 /**
- * Empty chat: Maruti lives on the hillside. He walks the path, climbs the trees, flies, swings on a vine, prays at the
- * temple, meditates, waters his sapling and more. Tap the sky to fly him there, a tree to climb it, the ground to call him,
- * or use the buttons. While the roaming overlay is him (flying across the screen, eavesdropping, standing guard) he hides here.
+ * Maruti lives on the hillside, in every chat. Full size in an empty chat, a smaller stage beside his bubble once you are
+ * talking. He walks the path, climbs the trees, flies, swings on a vine, prays at the temple, meditates, waters his sapling
+ * and more, about every 7 seconds if you leave him alone. Tap him and he does something; tap the sky to fly him there, a tree
+ * to climb it, the ground to call him. While the roaming overlay is him (flying across the screen, leaning in on your input,
+ * standing guard) he hides here.
  */
-export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => {
-  const { world, canMove, start, tapStage } = useMarutiWorld(brain);
+export const MarutiHero: React.FC<{ brain: MarutiBrain; compact?: boolean }> = ({ brain, compact = false }) => {
+  const { world, canMove, start, tapStage, poke } = useMarutiWorld(brain);
 
   const onStageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -54,21 +56,41 @@ export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => {
     tapStage(((e.clientX - r.left) / r.width) * 100, ((e.clientY - r.top) / r.height) * 100);
   };
 
-  return (
-    <div className="space-y-2">
-      <div
-        role="presentation"
-        onClick={onStageClick}
-        className="relative w-full overflow-hidden rounded-2xl border border-line"
-        style={{ aspectRatio: '1024 / 559' }}
-      >
-        <img src="/buddy/maruti-stage.webp" alt="" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
-        <MarutiProps world={world} />
-        <MarutiActor brain={brain} world={world} onTap={brain.poke} />
-        {brain.bubble && !brain.away && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%] z-10" />}
-        <MarutiControls brain={brain} className="absolute right-2 top-2 z-10" />
+  const stage = (
+    <div
+      role="presentation"
+      onClick={onStageClick}
+      className="relative w-full overflow-hidden rounded-2xl border border-line"
+      style={{ aspectRatio: '1024 / 559' }}
+    >
+      <img src="/buddy/maruti-stage.webp" alt="" className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+      <MarutiProps world={world} />
+      <MarutiActor brain={brain} world={world} onTap={poke} />
+      {!compact && brain.bubble && !brain.away && <Bubble text={brain.bubble} className="absolute left-2 top-2 max-w-[40%] z-10" />}
+      {!compact && <MarutiControls brain={brain} className="absolute right-2 top-2 z-10" />}
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div className="flex items-stretch gap-2 mb-2 shrink-0">
+        <div className="w-[64%] shrink-0">{stage}</div>
+        <div className="flex-1 min-w-0 flex flex-col justify-between gap-2">
+          <MarutiControls brain={brain} className="self-end" />
+          {brain.bubble && !brain.away ? (
+            <Bubble text={brain.bubble} />
+          ) : (
+            !brain.away && <span className="font-caption text-caption text-muted-text">Tap {BUDDY_NAME}, the sky or a tree.</span>
+          )}
+        </div>
       </div>
-      <div className="flex gap-1.5 overflow-x-auto pb-1" aria-label={`Ask ${BUDDY_NAME} to do something`}>
+    );
+  }
+
+  return (
+    <div className="space-y-2 text-center shrink-0 mb-2">
+      {stage}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 text-left" aria-label={`Ask ${BUDDY_NAME} to do something`}>
         {WORLD_CHIPS.map((chip) => (
           <button
             key={chip.label}
@@ -84,7 +106,7 @@ export const MarutiHero: React.FC<{ brain: MarutiBrain }> = ({ brain }) => {
       <p className="font-section text-section text-ink">Hey, I’m {BUDDY_NAME}.</p>
       <p className="font-caption text-caption text-muted-text">
         {canMove
-          ? 'Tap the sky to fly him there, a tree to climb it, the path to call him.'
+          ? 'Tap him, the sky to fly him there, a tree to climb it, the path to call him.'
           : `${BUDDY_NAME} is keeping still right now.`}
       </p>
     </div>

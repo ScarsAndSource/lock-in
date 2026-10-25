@@ -50,6 +50,10 @@ export interface World {
   hidden: boolean;
 }
 
+/** He is busy with the chat, asleep, being comforted, or you asked for stillness: no activities. */
+const blocked = (b: MarutiBrain): boolean =>
+  b.mood !== 'idle' || b.away || b.calm || b.quiet || b.comfort || prefersReducedMotion();
+
 const lay = (mood: MarutiMood, cloud: boolean): WorldVis => ({ kind: 'layered', mood, cloud });
 
 const initialWorld = (): World => ({
@@ -227,6 +231,8 @@ export interface MarutiWorldApi {
   canMove: boolean;
   start: (name: ActivityName | 'climb') => void;
   tapStage: (px: number, py: number) => void;
+  /** You tapped him: he does something. Poke him over and over and he finally breaks into laughter. */
+  poke: () => void;
 }
 
 /**
@@ -243,6 +249,7 @@ export function useMarutiWorld(brain: MarutiBrain): MarutiWorldApi {
   const busy = useRef<string | null>(null);
   const lastAct = useRef('');
   const timers = useRef<number[]>([]);
+  const pokes = useRef({ count: 0, last: 0 });
   const canMove = !brain.calm && !brain.quiet && !brain.comfort && !prefersReducedMotion();
   const interrupted = brain.mood !== 'idle' || brain.comfort || brain.quiet || brain.away || !canMove;
 
@@ -390,8 +397,7 @@ export function useMarutiWorld(brain: MarutiBrain): MarutiWorldApi {
 
   const start = useCallback(
     (name: ActivityName | 'climb') => {
-      const b = brainRef.current;
-      if (b.mood !== 'idle' || b.away || b.calm || b.quiet || b.comfort || prefersReducedMotion()) return;
+      if (blocked(brainRef.current)) return;
       const act: ActivityName = name === 'climb' ? (Math.random() < 0.6 ? 'climbR' : 'climbL') : name;
       play(act, ACTIVITIES[act]);
     },
@@ -401,8 +407,7 @@ export function useMarutiWorld(brain: MarutiBrain): MarutiWorldApi {
   /** Tap the scenery: a tree he climbs, the sky he flies to, the ground he walks to. */
   const tapStage = useCallback(
     (px: number, py: number) => {
-      const b = brainRef.current;
-      if (b.mood !== 'idle' || b.away || b.calm || b.quiet || b.comfort || prefersReducedMotion()) return;
+      if (blocked(brainRef.current)) return;
       if (px > 84 && py > 38) start('climbR');
       else if (px < 14 && py > 34) start('climbL');
       else if (py < 60) {
@@ -425,6 +430,33 @@ export function useMarutiWorld(brain: MarutiBrain): MarutiWorldApi {
     [play, start],
   );
 
+  const randomActivity = useCallback(() => {
+    const options = WEIGHTS.filter(([n]) => n !== lastAct.current);
+    let r = Math.random() * options.reduce((s, o) => s + o[1], 0);
+    let chosen = options[0][0];
+    for (const [n, w] of options) {
+      r -= w;
+      if (r <= 0) {
+        chosen = n;
+        break;
+      }
+    }
+    play(chosen, ACTIVITIES[chosen]);
+  }, [play]);
+
+  const poke = useCallback(() => {
+    const b = brainRef.current;
+    const now = Date.now();
+    pokes.current.count = now - pokes.current.last < 4000 ? pokes.current.count + 1 : 1;
+    pokes.current.last = now;
+    if (blocked(b) || pokes.current.count >= 5) {
+      if (pokes.current.count >= 5) pokes.current.count = 0;
+      b.poke();
+      return;
+    }
+    randomActivity();
+  }, [randomActivity]);
+
   // Chat, typing, sleep, calm mode or the roaming overlay needs him: drop the script and come home.
   useEffect(() => {
     if (!interrupted) return;
@@ -440,29 +472,19 @@ export function useMarutiWorld(brain: MarutiBrain): MarutiWorldApi {
       id = window.setTimeout(() => {
         const b = brainRef.current;
         if (document.visibilityState === 'visible' && !busy.current && b.mood === 'idle' && !b.away && !b.comfort && !b.quiet) {
-          const options = WEIGHTS.filter(([n]) => n !== lastAct.current);
-          let r = Math.random() * options.reduce((s, o) => s + o[1], 0);
-          let chosen = options[0][0];
-          for (const [n, w] of options) {
-            r -= w;
-            if (r <= 0) {
-              chosen = n;
-              break;
-            }
-          }
-          play(chosen, ACTIVITIES[chosen]);
+          randomActivity();
         }
         tick();
-      }, rand(5500, 9500));
+      }, rand(6000, 8000));
     };
     tick();
     return () => window.clearTimeout(id);
-  }, [canMove, play]);
+  }, [canMove, randomActivity]);
 
   // Never leave a timer running behind a screen that is gone.
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  return { world, canMove, start, tapStage };
+  return { world, canMove, start, tapStage, poke };
 }
 
 /** His own little pixel sapling. It keeps growing every time he waters it. */
@@ -508,7 +530,10 @@ const Vine: React.FC = () => (
 /** The one Maruti on the stage: layered when he walks, climbs or reacts to chat, a full-body pose when he does something. */
 export const MarutiActor: React.FC<{ brain: MarutiBrain; world: World; onTap: () => void }> = ({ brain, world, onTap }) => {
   const forced = brain.mood !== 'idle' || brain.comfort || brain.quiet;
-  const vis: WorldVis = forced ? lay(shownMood(brain), true) : world.vis;
+  // While he works through your logs he sits with his scroll; when you win he flexes. Everything else stays layered.
+  const chatPose: PoseName | null =
+    brain.comfort || brain.quiet ? null : brain.mood === 'thinking' ? 'scroll-write' : brain.mood === 'cheer' ? 'lift-mountain' : null;
+  const vis: WorldVis = forced ? (chatPose ? { kind: 'pose', pose: chatPose } : lay(shownMood(brain), true)) : world.vis;
   const hidden = brain.away || world.hidden;
   const widthPct = vis.kind === 'pose' ? (POSES[vis.pose].w / 177) * SPR : SPR;
   const drop = vis.kind === 'layered' && !vis.cloud ? 8 : 0;

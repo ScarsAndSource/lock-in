@@ -6,7 +6,7 @@ import { SupportCard } from '../components/SupportCard';
 import { ActionCards } from '../components/ActionCards';
 import { VoiceButton } from '../components/VoiceButton';
 import { BUDDY_NAME, BuddyAvatar } from '../components/Buddy';
-import { MarutiHero, MarutiStrip } from '../components/maruti/MarutiStage';
+import { MarutiHero } from '../components/maruti/MarutiStage';
 import { TypedText } from '../components/maruti/TypedText';
 import { useMaruti } from '../components/maruti/MarutiContext';
 import { classify } from '../components/maruti/banter';
@@ -187,12 +187,11 @@ export const ChatView: React.FC = () => {
         </div>
       )}
 
-      {messages.length > 0 && <MarutiStrip brain={brain} />}
+      <MarutiHero brain={brain} compact={messages.length > 0} />
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2">
         {messages.length === 0 && (
           <div className="py-2 space-y-4 text-center">
-            <MarutiHero brain={brain} />
             <p className="font-small text-small text-muted-text max-w-xs mx-auto">
               Ask about your own week. Answers come from your logs, not guesses.
             </p>
