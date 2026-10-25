@@ -80,10 +80,10 @@ export const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="bg-ground-chalk font-body-default text-ink flex flex-col min-h-screen">
+    <div className="font-body-default text-ink flex flex-col min-h-screen">
       <Header title={TITLES[activeTab]} onProfileClick={() => setSettingsOpen(true)} />
 
-      <main className="flex-1 flex flex-col w-full pt-16 pb-20 px-margin bg-ground-chalk">
+      <main className="flex-1 flex flex-col w-full pt-16 pb-20 px-margin">
         <Suspense fallback={<p className="py-10 text-center font-small text-muted-text">Loading…</p>}>
           {activeTab === 'now' && <NowView />}
           {activeTab === 'companion' && <ChatView />}

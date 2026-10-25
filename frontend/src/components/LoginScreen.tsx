@@ -89,7 +89,7 @@ export const LoginScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-ground-chalk text-ink flex flex-col items-center justify-center px-margin py-space-xl">
+    <div className="min-h-screen text-ink flex flex-col items-center justify-center px-margin py-space-xl">
       <div className="w-full max-w-sm space-y-4">
         <div className="space-y-1 text-center">
           <h1 className="font-title text-title text-ink">Lock’in</h1>

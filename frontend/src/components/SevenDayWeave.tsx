@@ -16,11 +16,11 @@ interface DayColumn {
 }
 
 const DOMAINS: { id: DomainId; label: string; fill: string; tint: string; stroke: string }[] = [
-  { id: 'habits', label: 'Habits', fill: 'bg-domain-habits-fill', tint: 'bg-domain-habits-tint', stroke: '#C84A21' },
-  { id: 'sleep', label: 'Sleep', fill: 'bg-domain-sleep-fill', tint: 'bg-domain-sleep-tint', stroke: '#1D5F73' },
-  { id: 'screen', label: 'Screen', fill: 'bg-domain-screen-fill', tint: 'bg-domain-screen-tint', stroke: '#E0A21B' },
-  { id: 'study', label: 'Study', fill: 'bg-domain-study-fill', tint: 'bg-domain-study-tint', stroke: '#4F7A2E' },
-  { id: 'urges', label: 'Urges', fill: 'bg-domain-urges-fill', tint: 'bg-domain-urges-tint', stroke: '#92405F' },
+  { id: 'habits', label: 'Habits', fill: 'bg-domain-habits-fill', tint: 'bg-domain-habits-tint', stroke: '#A5622F' },
+  { id: 'sleep', label: 'Sleep', fill: 'bg-domain-sleep-fill', tint: 'bg-domain-sleep-tint', stroke: '#4C6A92' },
+  { id: 'screen', label: 'Screen', fill: 'bg-domain-screen-fill', tint: 'bg-domain-screen-tint', stroke: '#C99A2E' },
+  { id: 'study', label: 'Study', fill: 'bg-domain-study-fill', tint: 'bg-domain-study-tint', stroke: '#5F8147' },
+  { id: 'urges', label: 'Urges', fill: 'bg-domain-urges-fill', tint: 'bg-domain-urges-tint', stroke: '#8B4C62' },
 ];
 
 const WORD: Record<ChainDomainStatus, string> = { good: 'good', partial: 'partial', missed: 'missed', none: 'not logged' };
@@ -39,7 +39,7 @@ const Dot: React.FC<{ status: ChainDomainStatus }> = ({ status }) => {
     return (
       <span
         className="block w-3.5 h-3.5 rounded-full border-2 border-ink"
-        style={{ background: 'linear-gradient(to top, #1B1C1A 50%, #eeeeea 50%)' }}
+        style={{ background: 'linear-gradient(to top, #261E18 50%, #F3EADE 50%)' }}
       />
     );
   }
