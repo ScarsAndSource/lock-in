@@ -177,7 +177,7 @@
   animation: mp-drop 0.8s ease-in infinite; }
 @keyframes mp-drop { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(34px); } }
 
-/* the vine: hangs from under the header and swings, slowing to a stop over 7s (see MarutiPet.tsx). left/top/height are set inline in px. */
+/* the vine: hangs from under the header and swings, slowing to a stop over 7s (see MarutiCompanion.tsx). left/top/height are set inline in px. */
 .mv { position: absolute; width: 0; pointer-events: none; transform-origin: 50% 0; animation: mv-swing 7s both; }
 .mv-line { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; margin-left: -2px; border-radius: 2px;
   background: repeating-linear-gradient(to bottom, #2d6a2d 0 8px, #3c8a38 8px 16px); box-shadow: 0 0 0 1px rgba(20, 50, 20, 0.45); }

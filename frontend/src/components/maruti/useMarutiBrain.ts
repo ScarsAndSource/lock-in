@@ -89,7 +89,7 @@ export function shownMood(b: Pick<MarutiBrain, 'mood' | 'comfort' | 'quiet'>): M
 
 /**
  * Maruti's mind, one shared instance for the whole app: what he says, his mood, voice, calm mode, sleep, comfort and
- * how he reacts to your chat. His body (where he walks, flies, climbs) is MarutiPet, which reads this and plays
+ * how he reacts to your chat. His body (where he walks, flies, climbs) is MarutiCompanion, which reads this and plays
  * activities only while he is idle.
  */
 export function useMarutiBrain(): MarutiBrain {

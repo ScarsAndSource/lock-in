@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import type { Tab } from '../context/AppContext';
 import { useCrew } from '../context/CrewContext';
 import { BUDDY_NAME } from './Buddy';
-import { MarutiPet } from './maruti/MarutiPet';
+import { MarutiCompanion } from './maruti/MarutiCompanion';
 
 const NAV_ITEMS: { key: Tab; label: string; icon: string }[] = [
   { key: 'now', label: 'Now', icon: 'today' },
@@ -18,7 +18,7 @@ export const BottomNav: React.FC = () => {
 
   return (
     <>
-      <MarutiPet />
+      <MarutiCompanion />
       <nav data-maruti-nav className="fixed bottom-0 w-full z-50 pb-safe bg-surface border-t border-surface-container">
         <div className="flex items-stretch justify-around h-16 w-full max-w-md mx-auto">
           {NAV_ITEMS.map((item) => {

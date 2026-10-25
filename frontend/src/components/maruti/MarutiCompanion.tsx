@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import type { Tab } from '../../context/AppContext';
 import { BUDDY_NAME } from '../Buddy';
 import { useMaruti } from './MarutiContext';
 import { MarutiSprite } from './MarutiSprite';
@@ -8,10 +9,10 @@ import type { MarutiBrain } from './useMarutiBrain';
 import { POSES, poseSrc } from './poses';
 import type { PoseName } from './poses';
 import { GUARD_LINES } from './banter';
-import { TAB_LINES, pick } from './lines';
+import { POKES, TAB_LINES, pick } from './lines';
 import { prefersReducedMotion, usePrefersReducedMotion } from './motion';
 import {
-  ACTIVITIES, DO_EVENT, EASE, GRIP, GUARD_SCALE, H, HOME_X, IDLE_HOME, SIZE, VINE_SCALE, WEIGHTS,
+  ACTIVITIES, DO_EVENT, EASE, GRIP, GUARD_SCALE, H, HOME_X, IDLE_HOME, SIZE, VINE_SCALE, VISITOR_PEEKS, WEIGHTS,
   clamp, homePlace, lay, pose as poseVis,
 } from './activities';
 import type { ActivityName, Builder, ChipRun, Geo, Place, Script, Vis } from './activities';
@@ -42,6 +43,20 @@ const PLACE_KEYS: (keyof Place)[] = ['x', 'y', 'rot', 'scale', 'flip'];
 let plantGrowth = 0;
 let vineRuns = 0;
 
+/** On other tabs he flies through once every 6 to 9 visits (about every 7 to 8), and otherwise only peeks. */
+const nextFlyAfter = (): number => 6 + Math.floor(Math.random() * 4);
+let visitsSinceFly = 0;
+let flyAfter = nextFlyAfter();
+
+const linesFor = (tab: Tab): readonly string[] => (tab === 'companion' ? [] : TAB_LINES[tab]);
+
+/** Do not butt in while you are typing into something or a sheet is open. */
+const userIsBusy = (): boolean => {
+  const el = document.activeElement;
+  if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
+  return document.querySelector('[role="dialog"], [aria-modal="true"]') !== null;
+};
+
 /** He is busy with the chat, asleep, being comforted, or you asked for stillness: no activities. */
 const blocked = (b: MarutiBrain): boolean =>
   b.mood !== 'idle' || b.calm || b.quiet || b.comfort || prefersReducedMotion();
@@ -58,11 +73,11 @@ const geo = (): Geo => {
   return { W, navTop, hdrB, ground: Math.max(raw, hdrB + H + 40) };
 };
 
-/** Where he rests when no activity is running: home, standing guard, or leaning in on your input box. */
-const restPlace = (b: MarutiBrain, onChat: boolean): Place => {
+/** Where he rests on his own tab: home, standing guard, or leaning in on your input box. */
+const restPlace = (b: MarutiBrain): Place => {
   const g = geo();
   if (b.comfort) return { ...homePlace(g), x: HOME_X + (SIZE * (GUARD_SCALE - 1)) / 2, scale: GUARD_SCALE };
-  if (b.eavesdrop && onChat) {
+  if (b.eavesdrop) {
     const input = document.querySelector('[data-maruti-input]');
     if (input) {
       const r = input.getBoundingClientRect();
@@ -73,12 +88,13 @@ const restPlace = (b: MarutiBrain, onChat: boolean): Place => {
 };
 
 /**
- * Maruti lives on the screen itself: no stage, no backdrop, just him. He walks along the nav bar (or your chat input),
- * flies across the whole app, climbs the screen edges, swings on a vine from under the header, prays, meditates, waters
- * a sapling, lifts a mountain, peeks from behind the bars and more. Anything the chat needs (he talks, thinks, laughs,
- * you type, he sleeps, you are sad) cancels what he is doing and he comes straight back, so chat reactions always win.
+ * Maruti has no stage and no backdrop, just him, and he is only really "there" on his own tab. There he stands on your
+ * chat input and does everything: walks, flies, climbs, swings on a vine, prays, meditates, waters a sapling, lifts a
+ * mountain, and reacts to your chat (thinking, laughing, leaning in while you type, standing guard when you are sad).
+ * On every other tab he is out of the way, hidden behind the nav bar. He only peeks now and then, and flies through
+ * once in a while (about once in 7 to 8 tab visits), never while you are typing. Chat reactions always win.
  */
-export const MarutiPet: React.FC = () => {
+export const MarutiCompanion: React.FC = () => {
   const { activeTab } = useApp();
   const brain = useMaruti();
   const brainRef = useRef(brain);
@@ -98,12 +114,15 @@ export const MarutiPet: React.FC = () => {
   const timers = useRef<number[]>([]);
   const pokes = useRef({ count: 0, last: 0 });
   const placed = useRef(false);
+  const shownRef = useRef(false);
 
+  const onChat = activeTab === 'companion';
   const canMove = !brain.calm && !brain.quiet && !brain.comfort && !reduced;
   const moodBusy = brain.mood !== 'idle';
 
   /** Merge into his state. Does nothing (no re-render) when nothing actually changes. */
   const patch = useCallback((p: Partial<Actor>) => {
+    if (p.shown !== undefined) shownRef.current = p.shown;
     for (const k of PLACE_KEYS) {
       const v = p[k];
       if (v !== undefined) (cur.current as unknown as Record<string, number | boolean>)[k] = v;
@@ -119,11 +138,27 @@ export const MarutiPet: React.FC = () => {
     timers.current = [];
   }, []);
 
-  /** Go to where he should be right now. animate=false jumps there. */
+  /**
+   * Go to where he should be right now. On his own tab that is his spot (home, guard, or leaning on the input); on any
+   * other tab he ducks behind the nav bar and stays hidden. animate=false jumps there.
+   */
   const rest = useCallback(
     (animate: boolean) => {
-      const p = restPlace(brainRef.current, tabRef.current === 'companion');
       const c = cur.current;
+      if (tabRef.current !== 'companion') {
+        const g = geo();
+        const hidden: Place = { x: HOME_X, y: g.navTop + 6, rot: 0, scale: 1, flip: false };
+        if (animate && placed.current && shownRef.current) {
+          const ms = clamp(Math.hypot(hidden.x - c.x, hidden.y - c.y) * 1.2, 350, 900);
+          patch({ ...hidden, dur: ms, ease: EASE, vis: IDLE_HOME, om: false });
+          timers.current.push(window.setTimeout(() => patch({ shown: false }), ms + 30));
+        } else {
+          patch({ ...hidden, dur: 0, ease: EASE, vis: IDLE_HOME, om: false, shown: false });
+        }
+        placed.current = true;
+        return;
+      }
+      const p = restPlace(brainRef.current);
       const dist = Math.hypot(p.x - c.x, p.y - c.y);
       const ms = animate && placed.current && dist > 1 ? clamp(dist * 1.6, 450, 1500) : 0;
       placed.current = true;
@@ -145,7 +180,8 @@ export const MarutiPet: React.FC = () => {
   );
 
   const play = useCallback(
-    (name: string, script: Script) => {
+    (name: string, script: Script, opts: { visitor?: boolean; tabLines?: readonly string[] } = {}) => {
+      const visitor = opts.visitor ?? false;
       clearTimers();
       busy.current = name;
       lastAct.current = name;
@@ -172,6 +208,7 @@ export const MarutiPet: React.FC = () => {
 
       const b: Builder = {
         g,
+        tabLines: opts.tabLines ?? [],
         say: (text) => at(() => brainRef.current.say(text, { mood: 'idle', speak: false, hold: 3600 })),
         wait: (ms) => {
           t += ms;
@@ -263,6 +300,7 @@ export const MarutiPet: React.FC = () => {
           else b.walk(home.x);
         },
         popHome: () => {
+          if (visitor) return; // a visitor just leaves; the rest() at the end keeps him hidden
           b.jump({ x: home.x, y: g.navTop + 6, rot: 0, scale: 1, flip: false }, IDLE_HOME);
           b.wait(60);
           b.to({ y: home.y }, 600, 'cubic-bezier(.2,1.35,.4,1)');
@@ -270,7 +308,7 @@ export const MarutiPet: React.FC = () => {
       };
 
       script(b);
-      if (Math.abs(px - home.x) > 2 || Math.abs(py - home.y) > 2) b.home();
+      if (!visitor && (Math.abs(px - home.x) > 2 || Math.abs(py - home.y) > 2)) b.home();
 
       for (const [ms, fn] of steps) timers.current.push(window.setTimeout(fn, ms));
       timers.current.push(
@@ -278,11 +316,16 @@ export const MarutiPet: React.FC = () => {
           busy.current = null;
           setVine(null);
           setSapling(null);
-          patch({ vis: IDLE_HOME, om: false, rot: 0, scale: 1, shown: true, dur: 300, ease: EASE });
+          if (visitor) {
+            brainRef.current.settle(); // clears his last line so no bubble lingers over an empty spot
+            rest(false);
+          } else {
+            patch({ vis: IDLE_HOME, om: false, rot: 0, scale: 1, shown: true, dur: 300, ease: EASE });
+          }
         }, t + 50),
       );
     },
-    [clearTimers, patch],
+    [clearTimers, patch, rest],
   );
 
   const start = useCallback(
@@ -331,20 +374,35 @@ export const MarutiPet: React.FC = () => {
     restNow(placed.current);
   }, [moodBusy, brain.comfort, brain.quiet, brain.eavesdrop, canMove, restNow]);
 
-  // New tab: he settles at that tab's spot and says something about it.
+  /** A visit to another tab: one peek, or (every 7-8 visits) a fly-through. Skipped if you are busy or he is not free. */
+  const visit = useCallback(
+    (fly: boolean, lines: readonly string[]) => {
+      if (tabRef.current === 'companion' || busy.current || blocked(brainRef.current) || userIsBusy()) return;
+      if (fly) {
+        visitsSinceFly = 0;
+        flyAfter = nextFlyAfter();
+        play('flyBy', ACTIVITIES.flyBy, { visitor: true, tabLines: lines });
+        return;
+      }
+      const name = pick(VISITOR_PEEKS);
+      play(name, ACTIVITIES[name], { visitor: true, tabLines: lines });
+    },
+    [play],
+  );
+
+  // New tab: he goes back to his spot (on his own tab) or ducks out of sight (anywhere else), and may drop in a bit later.
   const prevTab = useRef(activeTab);
   useEffect(() => {
     if (prevTab.current === activeTab) return;
     prevTab.current = activeTab;
     restNow();
-    const lines = activeTab === 'companion' ? undefined : TAB_LINES[activeTab];
-    if (!lines || blocked(brainRef.current) || Math.random() > 0.7) return;
-    timers.current.push(
-      window.setTimeout(() => {
-        if (!blocked(brainRef.current)) brainRef.current.say(pick(lines), { mood: 'idle', speak: false, hold: 3200 });
-      }, 600),
-    );
-  }, [activeTab, restNow]);
+    if (activeTab === 'companion') return;
+    visitsSinceFly += 1;
+    const fly = visitsSinceFly >= flyAfter;
+    if (!fly && Math.random() > 0.35) return;
+    const lines = linesFor(activeTab);
+    timers.current.push(window.setTimeout(() => visit(fly, lines), 1800 + Math.random() * 3500));
+  }, [activeTab, restNow, visit]);
 
   // The screen changed under him (rotated, keyboard, a tab finished loading): stand on the right spot again.
   useEffect(() => {
@@ -380,28 +438,31 @@ export const MarutiPet: React.FC = () => {
     return () => window.removeEventListener(DO_EVENT, onAsk);
   }, [start]);
 
-  // Left alone, he gets on with his day every so often.
+  // Left alone on his own tab he gets on with his day; on other tabs he only peeks, rarely.
   useEffect(() => {
     if (!canMove) return;
     let id = 0;
     const tick = () => {
+      const own = tabRef.current === 'companion';
       id = window.setTimeout(() => {
-        if (document.visibilityState === 'visible' && !busy.current && !blocked(brainRef.current)) randomActivity();
+        if (document.visibilityState === 'visible' && !busy.current && !blocked(brainRef.current)) {
+          if (tabRef.current === 'companion') randomActivity();
+          else if (Math.random() < 0.5) visit(false, linesFor(tabRef.current));
+        }
         tick();
-      }, 7000 + Math.random() * 5000);
+      }, own ? 9000 + Math.random() * 6000 : 55000 + Math.random() * 40000);
     };
     tick();
     return () => window.clearTimeout(id);
-  }, [canMove, randomActivity]);
+  }, [canMove, activeTab, randomActivity, visit]);
 
   // Never leave a timer running behind a screen that is gone.
   useEffect(() => () => clearTimers(), [clearTimers]);
 
   // What he shows: chat reactions win (thinking, talking, sleeping, guarding); otherwise whatever his script says.
-  const onChat = activeTab === 'companion';
   const base = shownMood(brain);
   const spriteMood = brain.eavesdrop && onChat && base !== 'thinking' && base !== 'talking' ? 'eavesdrop' : base;
-  const forced = brain.mood !== 'idle' || brain.comfort || brain.quiet;
+  const forced = onChat && (brain.mood !== 'idle' || brain.comfort || brain.quiet);
   const chatPose: PoseName | null =
     brain.comfort || brain.quiet ? null : brain.mood === 'thinking' ? 'scroll-write' : brain.mood === 'cheer' ? 'lift-mountain' : null;
   const vis: Vis = forced ? (chatPose ? poseVis(chatPose) : lay(spriteMood, true)) : actor.vis;
@@ -412,10 +473,15 @@ export const MarutiPet: React.FC = () => {
   const above = topEdge > 96;
   const bubbleLeft = clamp(actor.x + SIZE / 2 - 100, 8, Math.max(8, vw - 208));
   const bubbleTop = above ? topEdge - 6 : actor.y + H + 6;
-  const guarding = brain.comfort && actor.shown;
+  const guarding = brain.comfort && onChat && actor.shown;
 
   const tap = () => {
     const b = brainRef.current;
+    if (tabRef.current !== 'companion') {
+      // Just visiting: a quick remark, he carries on with his peek.
+      b.say(pick(POKES, b.bubble), { mood: 'idle', speak: false, hold: 2200 });
+      return;
+    }
     if (b.comfort) b.say(pick(GUARD_LINES, b.bubble), { speak: false, hold: 4000 });
     else poke();
   };
@@ -508,7 +574,7 @@ export const MarutiPet: React.FC = () => {
         </div>
       </div>
 
-      {brain.bubble && (
+      {brain.bubble && (onChat || actor.shown) && (
         <div
           role="status"
           aria-live="polite"

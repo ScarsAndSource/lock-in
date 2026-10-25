@@ -29,7 +29,7 @@ export const MarutiControls: React.FC<{ brain: MarutiBrain; className?: string }
 );
 
 /**
- * Maruti himself lives on the screen (MarutiPet). This is only his remote: the buttons that ask him to do something,
+ * Maruti himself lives on the screen (MarutiCompanion). This is only his remote: the buttons that ask him to do something,
  * plus voice and calm. Full in an empty chat, just the two switches once you are talking.
  */
 export const MarutiBar: React.FC<{ brain: MarutiBrain; compact?: boolean }> = ({ brain, compact = false }) => {

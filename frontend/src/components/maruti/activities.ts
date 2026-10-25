@@ -7,7 +7,7 @@ import { JOKES, SELF_LAUGH } from './banter';
 
 /**
  * Everything Maruti can do on the screen, as small scripts. A script only describes what happens (walk here, hold
- * this pose, say this); MarutiPet plays it. All coordinates are CSS pixels. A sprite's (x, y) is the top-left of his
+ * this pose, say this); MarutiCompanion plays it. All coordinates are CSS pixels. A sprite's (x, y) is the top-left of his
  * SIZE x H box, so his feet are at y + H.
  */
 
@@ -51,6 +51,8 @@ export const homePlace = (g: Geo): Place => ({ x: HOME_X, y: g.ground - H, rot: 
 
 export interface Builder {
   g: Geo;
+  /** Lines about the tab he is visiting (empty on his own tab). Peeks borrow them so he comments on where he is. */
+  tabLines: readonly string[];
   say: (text: string) => void;
   wait: (ms: number) => void;
   /** Appear instantly. Follow with wait(60) before animating so the browser paints the start first. */
@@ -69,7 +71,7 @@ export interface Builder {
   sapling: (x: number | null) => void;
   /** Back to his spot, on foot or on the cloud. Called for you when a script ends away from home. */
   home: () => void;
-  /** Slip out from behind the nav bar at his spot. */
+  /** Slip out from behind the nav bar at his spot. Does nothing when he is only visiting another tab: he just leaves. */
   popHome: () => void;
 }
 
@@ -78,7 +80,7 @@ export type Script = (b: Builder) => void;
 export type ActivityName =
   | 'stroll' | 'pray' | 'meditate' | 'snack' | 'garden' | 'write' | 'mountain' | 'bridge' | 'baby'
   | 'flight' | 'cloud' | 'climbR' | 'climbL' | 'swing' | 'joke' | 'wave' | 'chatter' | 'thought'
-  | 'peekBottom' | 'peekSide' | 'peekTop' | 'rollNav' | 'walkIn';
+  | 'peekBottom' | 'peekSide' | 'peekTop' | 'rollNav' | 'walkIn' | 'flyBy';
 
 const LINES = {
   stroll: ['Chalo, thoda tehal ke aate hain.', 'Pair khol lete hain, phir kaam.', 'Ek chakkar, phir wapas.'],
@@ -96,6 +98,10 @@ const LINES = {
   climbTop: ['Upar se sab saaf dikhta hai.', 'Yahan se tera din bhi dikhta hai.'],
   swing: ['Bel pakad li. Jhoola!', 'Jai Bajrang Bali!'],
 } as const;
+
+/** What he says when he peeks: often something about the tab he is on, otherwise a generic peek line. */
+const peekLine = (b: Builder, pool: readonly string[] = PEEK_LINES): string =>
+  pick(b.tabLines.length > 0 && Math.random() < 0.6 ? b.tabLines : pool);
 
 /** A random x along the ground, kept off the very edges. */
 const spot = (g: Geo): number => rand(24, Math.max(25, g.W - SIZE - 24));
@@ -213,7 +219,7 @@ export const ACTIVITIES: Record<ActivityName, Script> = {
     b.wait(60);
     b.to({ y: g.navTop - H * 0.55 }, 650, POP);
     b.wait(100);
-    if (Math.random() < 0.7) b.say(pick(PEEK_LINES));
+    if (Math.random() < 0.7) b.say(peekLine(b));
     b.wait(3400);
     b.to({ y: g.navTop + 6 }, 450);
     b.popHome();
@@ -228,7 +234,7 @@ export const ACTIVITIES: Record<ActivityName, Script> = {
     b.wait(60);
     b.to({ x: inX, rot: right ? -10 : 10 }, 700, POP);
     b.wait(100);
-    b.say(pick(SIDE_LINES));
+    b.say(peekLine(b, SIDE_LINES));
     b.wait(3100);
     b.to({ x: outX, rot: 0 }, 500);
     b.popHome();
@@ -240,7 +246,7 @@ export const ACTIVITIES: Record<ActivityName, Script> = {
     b.wait(60);
     b.to({ y: g.hdrB - H * 0.5 }, 700, POP);
     b.wait(100);
-    b.say(pick(PEEK_LINES));
+    b.say(peekLine(b));
     b.wait(3100);
     b.to({ y: g.hdrB - H - 4 }, 480);
     b.popHome();
@@ -260,6 +266,20 @@ export const ACTIVITIES: Record<ActivityName, Script> = {
     b.wait(60);
     b.to({ y: g.navTop + 6 }, 500);
     b.popHome();
+  },
+  /** The visitor's fly-through: in from one side, one swoop across the upper screen, out the other. He does not stop. */
+  flyBy: (b) => {
+    const { g } = b;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const minY = g.hdrB + 40;
+    const maxY = Math.max(minY + 40, g.navTop * 0.6);
+    const startX = dir > 0 ? -SIZE - 20 : g.W + 20;
+    const endX = dir > 0 ? g.W + 20 : -SIZE - 20;
+    b.jump({ x: startX, y: rand(minY, maxY), rot: 0, scale: 0.8, flip: dir < 0 }, pose('fly-small'));
+    b.wait(60);
+    b.fly(g.W / 2 - SIZE / 2, rand(minY, maxY), 'fly-gada-rock');
+    if (Math.random() < 0.6) b.say(pick(FLY_LINES));
+    b.fly(endX, rand(minY, maxY), 'fly-small');
   },
   walkIn: (b) => {
     const { g } = b;
@@ -283,6 +303,9 @@ export const WEIGHTS: [ActivityName, number][] = [
   ['walkIn', 4],
 ];
 
+/** On other tabs he only peeks (and, now and then, flies through). */
+export const VISITOR_PEEKS: ActivityName[] = ['peekBottom', 'peekSide', 'peekTop'];
+
 export type ChipRun = ActivityName | 'climb';
 
 /** The buttons in his chat. Each one is just an activity he can do on request. */
@@ -301,7 +324,7 @@ export const WORLD_CHIPS: { label: string; run: ChipRun }[] = [
   { label: 'Friend', run: 'baby' },
 ];
 
-/** Any screen can ask him to do something; MarutiPet listens. */
+/** Any screen can ask him to do something; MarutiCompanion listens. */
 export const DO_EVENT = 'maruti:do';
 export const askMaruti = (what: ChipRun): void => {
   window.dispatchEvent(new CustomEvent<ChipRun>(DO_EVENT, { detail: what }));
