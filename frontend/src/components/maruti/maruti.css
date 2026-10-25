@@ -147,11 +147,11 @@
   .m-sleep .mr-eyes-closed { opacity: 1; }
 }
 
-/* ground: no cloud under him (walking, climbing, standing on the hillside). Climb and hang already hide it. */
+/* ground: no cloud under him (walking, climbing, hanging). Climb and hang already hide it. */
 .mr-cloud { transition: opacity 0.25s ease; }
 .mr-ground .mr-cloud { opacity: 0; }
 
-/* full-body poses cut from the artwork: they share the stage with the layered Maruti */
+/* full-body poses cut from the artwork: the on-screen Maruti swaps between these and the layered sprite */
 .mp { display: block; position: relative; width: 100%; padding: 0; border: 0; background: none; cursor: pointer;
   -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
 .mp-flip { display: block; }
@@ -177,13 +177,14 @@
   animation: mp-drop 0.8s ease-in infinite; }
 @keyframes mp-drop { 0% { opacity: 0; transform: translateY(0); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(34px); } }
 
-/* the vine: hangs from above the stage and swings, slowing to a stop over 7s (see MarutiWorld.tsx) */
-.mv { position: absolute; left: 0; top: -1%; width: 100%; pointer-events: none; z-index: 4; animation: mv-swing 7s both; }
-.mv-line { position: absolute; top: 0; bottom: 0; width: 4px; margin-left: -2px; border-radius: 2px;
+/* the vine: hangs from under the header and swings, slowing to a stop over 7s (see MarutiPet.tsx). left/top/height are set inline in px. */
+.mv { position: absolute; width: 0; pointer-events: none; transform-origin: 50% 0; animation: mv-swing 7s both; }
+.mv-line { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; margin-left: -2px; border-radius: 2px;
   background: repeating-linear-gradient(to bottom, #2d6a2d 0 8px, #3c8a38 8px 16px); box-shadow: 0 0 0 1px rgba(20, 50, 20, 0.45); }
-.mv-leaf { position: absolute; width: 12px; height: 7px; border-radius: 100% 0 100% 0; background: #4aa03f; border: 1px solid #2d6a2d; }
+.mv-leaf { position: absolute; left: 0; width: 12px; height: 7px; border-radius: 100% 0 100% 0; background: #4aa03f; border: 1px solid #2d6a2d; }
 .mv-leaf-l { margin-left: -13px; transform: rotate(-20deg); }
 .mv-leaf-r { margin-left: 1px; transform: scaleX(-1) rotate(-20deg); }
+.mv-hand { position: absolute; left: 0; top: 100%; }
 @keyframes mv-swing {
   0% { transform: rotate(0); animation-timing-function: ease-in-out; }
   12% { transform: rotate(-26deg); animation-timing-function: ease-in-out; }

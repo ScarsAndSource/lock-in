@@ -4,10 +4,9 @@ import type { MarutiBrain } from './useMarutiBrain';
 
 const MarutiCtx = createContext<MarutiBrain | null>(null);
 
-/** One Maruti for the whole app: the chat tab and the roaming overlay share the same brain. */
+/** One Maruti for the whole app: the chat tab and the on-screen sprite share the same brain. */
 export const MarutiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // The hillside world (MarutiWorld) moves him now, so the brain's own wandering stays off.
-  const brain = useMarutiBrain(false);
+  const brain = useMarutiBrain();
   return <MarutiCtx.Provider value={brain}>{children}</MarutiCtx.Provider>;
 };
 

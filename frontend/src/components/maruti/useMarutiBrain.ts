@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AFTER_REPLY, NUDGES, POKES, POKES_MANY, PONDER, THINKING, WAKE, pick } from './lines';
 import {
-  AFTER_REPLY, IDLE_CHATTER, IDLE_THOUGHTS, NUDGES, POKES, POKES_MANY, PONDER, THINKING, WAKE, WAVES, pick,
-} from './lines';
-import {
-  ANGRY_BACK, BORED_BACK, COMFORT_END, EAVES, GREET_BACK, GUARD_LINES, JOKES, LAUGH_BACK, SAD_BACK, THANKS_BACK, TIRED_BACK, WIN_BACK,
+  ANGRY_BACK, BORED_BACK, COMFORT_END, EAVES, GREET_BACK, GUARD_LINES, LAUGH_BACK, SAD_BACK, THANKS_BACK, TIRED_BACK, WIN_BACK,
 } from './banter';
 import type { Reaction } from './banter';
+import { prefersReducedMotion } from './motion';
 
 export type MarutiMood =
   | 'idle' | 'talking' | 'thinking' | 'ponder' | 'listening' | 'cheer' | 'twirl'
@@ -15,7 +14,6 @@ export type MarutiMood =
 const VOICE_KEY = 'lockin.maruti.voice';
 const CALM_KEY = 'lockin.maruti.calm';
 const TYPE_MS = 28;
-const MAX_X = 0.45; // how far he strolls, as a fraction of his own width
 const SLEEP_AFTER_MS = 75000;
 const SOBER_MS = 30 * 60 * 1000;
 const COMFORT_MS = 5 * 60 * 1000;
@@ -38,9 +36,6 @@ const writeFlag = (key: string, on: boolean): void => {
     /* preferences are a convenience */
   }
 };
-const prefersReducedMotion = (): boolean =>
-  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 const clearTimer = (ref: { current: number | null }) => {
   if (ref.current !== null) {
     window.clearTimeout(ref.current);
@@ -59,23 +54,16 @@ export interface SayOptions {
 export interface MarutiBrain {
   mood: MarutiMood;
   bubble: string;
-  x: number;
-  y: number;
-  flip: boolean;
-  walkMs: number;
   calm: boolean;
   voice: boolean;
   /** True after a support reply: he stays still and serious everywhere. */
   quiet: boolean;
   /** You are sad: he grows and stands guard next to you. */
   comfort: boolean;
-  /** The roaming overlay is him right now; the in-page sprite hides. */
-  away: boolean;
   /** You are typing and he has gone to lean in on the input box. */
   eavesdrop: boolean;
   say: (text: string, opts?: SayOptions) => void;
   act: (mood: MarutiMood, ms?: number) => void;
-  setAway: (on: boolean) => void;
   setComfort: (on: boolean, silent?: boolean) => void;
   react: (kind: Exclude<Reaction, 'crisis'>) => void;
   listening: () => void;
@@ -100,27 +88,20 @@ export function shownMood(b: Pick<MarutiBrain, 'mood' | 'comfort' | 'quiet'>): M
 }
 
 /**
- * Maruti's behaviour, one shared instance for the whole app. `wander` is true only while his own tab is open:
- * then he strolls, hovers, waves, jokes and rolls inside the hero. Everywhere else the roamer overlay drives him
- * through `act`/`say`. Wandering needs: idle, visible, not calm mode, not reduced motion, not sober, not comforting.
+ * Maruti's mind, one shared instance for the whole app: what he says, his mood, voice, calm mode, sleep, comfort and
+ * how he reacts to your chat. His body (where he walks, flies, climbs) is MarutiPet, which reads this and plays
+ * activities only while he is idle.
  */
-export function useMarutiBrain(wander = true): MarutiBrain {
+export function useMarutiBrain(): MarutiBrain {
   const [mood, setMoodState] = useState<MarutiMood>('idle');
   const [bubble, setBubble] = useState('');
-  const [x, setX] = useState(0);
-  const [y, setY] = useState(0);
-  const [flip, setFlip] = useState(false);
-  const [walkMs, setWalkMs] = useState(1400);
   const [quiet, setQuiet] = useState(false);
   const [comfort, setComfortState] = useState(false);
-  const [away, setAwayState] = useState(false);
   const [eavesdrop, setEavesdrop] = useState(false);
   const [calm, setCalm] = useState<boolean>(() => readFlag(CALM_KEY));
   const [voice, setVoice] = useState<boolean>(() => readFlag(VOICE_KEY));
 
   const moodRef = useRef<MarutiMood>('idle');
-  const xRef = useRef(0);
-  const wanderRef = useRef(wander);
   const calmRef = useRef(calm);
   const voiceRef = useRef(voice);
   const soberRef = useRef(false);
@@ -138,7 +119,6 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   const soberTimer = useRef<number | null>(null);
   const comfortTimer = useRef<number | null>(null);
   const resumeTimer = useRef<number | null>(null);
-  const jokeTimer = useRef<number | null>(null);
   const eavesStartTimer = useRef<number | null>(null);
   const eavesEndTimer = useRef<number | null>(null);
   const pokes = useRef({ count: 0, last: 0 });
@@ -146,7 +126,6 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   const lastThought = useRef(0);
   const lastActive = useRef(Date.now());
 
-  wanderRef.current = wander;
   calmRef.current = calm;
   voiceRef.current = voice;
 
@@ -154,8 +133,6 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     moodRef.current = m;
     setMoodState(m);
   }, []);
-
-  const setAway = useCallback((on: boolean) => setAwayState(on), []);
 
   const cancelSpeech = useCallback(() => {
     speakingRef.current = false;
@@ -171,7 +148,6 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     clearTimer(followTimer);
     clearTimer(safetyTimer);
     clearTimer(resumeTimer);
-    clearTimer(jokeTimer);
     cancelSpeech();
   }, [cancelSpeech]);
 
@@ -221,7 +197,7 @@ export function useMarutiBrain(wander = true): MarutiBrain {
     [setMood],
   );
 
-  /** Set a mood directly (the roamer uses this). ms > 0 returns to idle afterwards; 0 stays until changed. */
+  /** Set a mood directly (the chat uses this). ms > 0 returns to idle afterwards; 0 stays until changed. */
   const act = useCallback(
     (m: MarutiMood, ms = 0) => {
       clearTimer(moodTimer);
@@ -466,86 +442,19 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   );
 
   const toggleCalm = useCallback(() => {
-    setCalm((c) => {
-      writeFlag(CALM_KEY, !c);
-      return !c;
-    });
+    const next = !calmRef.current;
+    calmRef.current = next;
+    writeFlag(CALM_KEY, next);
+    setCalm(next);
   }, []);
 
   const toggleVoice = useCallback(() => {
-    setVoice((v) => {
-      writeFlag(VOICE_KEY, !v);
-      if (v) cancelSpeech();
-      return !v;
-    });
+    const next = !voiceRef.current;
+    voiceRef.current = next;
+    writeFlag(VOICE_KEY, next);
+    if (!next) cancelSpeech();
+    setVoice(next);
   }, [cancelSpeech]);
-
-  // Leaving his own tab: park him back at the centre of the hero for next time.
-  useEffect(() => {
-    if (!wander) {
-      xRef.current = 0;
-      setX(0);
-      setY(0);
-      stopEaves();
-    }
-  }, [wander, stopEaves]);
-
-  // Wandering inside the hero: strolls, hovers, waves, tells jokes and laughs at them, now and then rolls.
-  useEffect(() => {
-    if (calm || prefersReducedMotion()) return;
-    let id: number;
-    const pickX = (range: number) => {
-      let nx = (Math.random() * 2 - 1) * range;
-      if (Math.abs(nx - xRef.current) < 0.2) nx = xRef.current > 0 ? -range * 0.8 : range * 0.8;
-      return nx;
-    };
-    const move = (nx: number, m: MarutiMood, ms: number, ny: number) => {
-      setFlip(nx < xRef.current);
-      xRef.current = nx;
-      setX(nx);
-      setY(ny);
-      setWalkMs(ms);
-      setMood(m);
-      clearTimer(moodTimer);
-      moodTimer.current = window.setTimeout(() => {
-        setWalkMs(700);
-        setY(0);
-        setMood('idle');
-      }, ms + 100);
-    };
-    const joke = () => {
-      const text = pick(JOKES, lastLine.current);
-      say(text, { mood: 'talking', keep: true, speak: false, hold: 4500 });
-      jokeTimer.current = window.setTimeout(() => {
-        if (soberRef.current || comfortRef.current || !wanderRef.current) return;
-        if (Math.random() < 0.45) move(pickX(0.6), 'rofl', 2200, 0);
-        else act('laugh', 1800);
-      }, Math.min(text.length, 90) * TYPE_MS + 400);
-    };
-    const tick = () => {
-      id = window.setTimeout(() => {
-        if (
-          wanderRef.current && document.visibilityState === 'visible' && moodRef.current === 'idle' &&
-          !soberRef.current && !comfortRef.current
-        ) {
-          const r = Math.random();
-          if (r < 0.28) move(pickX(MAX_X), 'walk', 1400, 0);
-          else if (r < 0.4) {
-            setMood('twirl');
-            clearTimer(moodTimer);
-            moodTimer.current = window.setTimeout(() => setMood('idle'), 1200);
-          } else if (r < 0.55) move(pickX(0.85), 'fly', 1900, -0.09);
-          else if (r < 0.66) say(pick(WAVES, lastLine.current), { mood: 'wave', speak: false });
-          else if (r < 0.78) say(pick(IDLE_CHATTER, lastLine.current), { speak: false });
-          else if (r < 0.88) say(pick(IDLE_THOUGHTS, lastLine.current), { mood: 'ponder', speak: false, hold: 3500 });
-          else joke();
-        }
-        tick();
-      }, 5000 + Math.random() * 4500);
-    };
-    tick();
-    return () => window.clearTimeout(id);
-  }, [calm, say, act, setMood]);
 
   // While he stands guard next to you, a steady word now and then.
   useEffect(() => {
@@ -592,8 +501,8 @@ export function useMarutiBrain(wander = true): MarutiBrain {
   );
 
   return {
-    mood, bubble, x, y, flip, walkMs, calm, voice, quiet, comfort, away, eavesdrop,
-    say, act, setAway, setComfort, react, listening, stopListening, thinking, talkReply, finishTalk,
+    mood, bubble, calm, voice, quiet, comfort, eavesdrop,
+    say, act, setComfort, react, listening, stopListening, thinking, talkReply, finishTalk,
     poke, settle, sober, toggleCalm, toggleVoice,
   };
 }

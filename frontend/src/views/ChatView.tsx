@@ -6,7 +6,7 @@ import { SupportCard } from '../components/SupportCard';
 import { ActionCards } from '../components/ActionCards';
 import { VoiceButton } from '../components/VoiceButton';
 import { BUDDY_NAME, BuddyAvatar } from '../components/Buddy';
-import { MarutiHero } from '../components/maruti/MarutiStage';
+import { MarutiBar } from '../components/maruti/MarutiBar';
 import { TypedText } from '../components/maruti/TypedText';
 import { useMaruti } from '../components/maruti/MarutiContext';
 import { classify } from '../components/maruti/banter';
@@ -30,6 +30,8 @@ export const ChatView: React.FC = () => {
   const [typingId, setTypingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageCountRef = useRef(0);
+  // A thread we just created from the first message already has its messages on screen: do not reload (and wipe) them.
+  const justCreatedRef = useRef<string | null>(null);
   messageCountRef.current = messages.length;
 
   useEffect(() => {
@@ -46,6 +48,10 @@ export const ChatView: React.FC = () => {
 
   useEffect(() => {
     if (activeThreadId) {
+      if (justCreatedRef.current === activeThreadId) {
+        justCreatedRef.current = null;
+        return;
+      }
       let cancelled = false;
       getThreadDetail(activeThreadId)
         .then((detail) => {
@@ -110,6 +116,7 @@ export const ChatView: React.FC = () => {
       }
       setSupport(nextSupport);
       if (!activeThreadId) {
+        justCreatedRef.current = res.thread.id;
         setActiveThreadId(res.thread.id);
         setThreads((prev) => [res.thread, ...prev]);
       }
@@ -164,7 +171,10 @@ export const ChatView: React.FC = () => {
           {threads.length > 1 ? (
             <select
               value={activeThreadId || ''}
-              onChange={(e) => setActiveThreadId(e.target.value || null)}
+              onChange={(e) => {
+                setTypingId(null);
+                setActiveThreadId(e.target.value || null);
+              }}
               className="min-w-0 flex-1 bg-surface border border-line rounded-lg px-2 h-9 text-[12px] font-caption text-ink"
             >
               {activeThreadId === null && <option value="">New chat</option>}
@@ -187,7 +197,7 @@ export const ChatView: React.FC = () => {
         </div>
       )}
 
-      <MarutiHero brain={brain} compact={messages.length > 0} />
+      <MarutiBar brain={brain} compact={messages.length > 0} />
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 pb-2">
         {messages.length === 0 && (
@@ -270,12 +280,13 @@ export const ChatView: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={handleSend} className="pt-2 shrink-0 flex items-center gap-2">
+      <form data-maruti-ground onSubmit={handleSend} className="pt-2 shrink-0 flex items-center gap-2">
         <VoiceButton
           disabled={isSending}
           onTranscript={(t) => onInput(`${inputText.trim() ? `${inputText.trim()} ` : ''}${t}`)}
         />
         <input
+          data-maruti-input
           type="text"
           value={inputText}
           onChange={(e) => onInput(e.target.value)}
