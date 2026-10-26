@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+ï»¿import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { captureUrge } from '../api/tracking';
 import { getDueIntentions } from '../api/profile';
@@ -43,10 +43,10 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
         trigger_context: triggerContext.trim() || null,
         coping_strategy: copingStrategy.trim() || null,
       });
-      if (saved.queued) { showToast('Urge queued — will sync when back online.'); return; }
+      if (saved.queued) { showToast('Urge queued ï¿½ will sync when back online.'); return; }
       if (saved.support) { setSupport(saved.support); return; }
       bumpData();
-      showToast(Urge logged: ${selectedOutcome});
+      showToast(`Urge logged: ${selectedOutcome}`);
       onClose();
     } catch (err) {
       showToast(errorMessage(err, 'Could not log urge'));
