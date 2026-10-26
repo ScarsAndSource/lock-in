@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { addPhotoEvents, parseScheduleImage, type CalendarKind, type ProposedItem, type ScheduleProposal } from '../api/calendar';
 import { createTask } from '../api/tasks';
@@ -12,6 +12,12 @@ interface SchedulePhotoProps {
   onAdded: () => Promise<void> | void;
   className?: string;
   disabled?: boolean;
+  /** A picture that arrived some other way (Android share sheet): read it right away, with no button press. */
+  autoFile?: File | null;
+  /** The auto-read picture is finished with (saved, dismissed, or nothing found). */
+  onAutoDone?: () => void;
+  /** Render only the review sheet (used with autoFile). */
+  hideButton?: boolean;
 }
 
 const KIND_LABEL: Record<CalendarKind, string> = { exam: 'Exam', class: 'Class', other: 'Event' };
@@ -28,7 +34,7 @@ function describe(i: ProposedItem): string {
  * ticked by default and the person unticks what is wrong before anything is saved. Events go to the calendar (exam
  * nudges use them), tasks go to the task list with their deadline.
  */
-export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className, disabled }) => {
+export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className, disabled, autoFile, onAutoDone, hideButton }) => {
   const { showToast, bumpData } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
@@ -36,11 +42,19 @@ export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [picked, setPicked] = useState<boolean[]>([]);
 
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // the same photo can be chosen again
-    if (!file || reading) return;
+  const autoActive = useRef(false);
+  const autoStartedFor = useRef<File | null>(null);
+  const finishAuto = () => {
+    if (autoActive.current) {
+      autoActive.current = false;
+      onAutoDone?.();
+    }
+  };
+
+  const readFile = async (file: File) => {
+    if (reading) return;
     setReading(true);
+    let opened = false;
     try {
       const blob = await shrinkImageIfNeeded(file);
       const res = await parseScheduleImage(blob);
@@ -54,15 +68,34 @@ export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className
       }
       setProposal(res);
       setPicked(res.items.map(() => true));
+      opened = true;
     } catch (err: unknown) {
       showToast(errorMessage(err, 'Could not read that picture'));
     } finally {
       setReading(false);
+      if (!opened) finishAuto();
     }
   };
 
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // the same photo can be chosen again
+    if (!file) return;
+    await readFile(file);
+  };
+
+  useEffect(() => {
+    if (!autoFile || autoStartedFor.current === autoFile) return; // StrictMode runs effects twice: read the picture once
+    autoStartedFor.current = autoFile;
+    autoActive.current = true;
+    void readFile(autoFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFile]);
+
   const close = () => {
-    if (!saving) setProposal(null);
+    if (saving) return;
+    setProposal(null);
+    finishAuto();
   };
 
   const save = async () => {

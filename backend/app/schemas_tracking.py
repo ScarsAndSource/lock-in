@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.domain import GoalStatus, UrgeOutcome
+from app.schemas_chat import SupportOut
 
 Domain = Literal["habit", "screen_time", "urge", "study", "sleep"]
 
@@ -85,6 +86,9 @@ class UrgeCaptureRequest(BaseModel):
     trigger_context: Annotated[str | None, Field(max_length=500)] = None
     coping_strategy: Annotated[str | None, Field(max_length=300)] = None
     note: Annotated[str | None, Field(max_length=2000)] = None
+    # Idempotency key from the client (offline queue). Re-sending the same id returns the log already stored
+    # instead of creating a second one, so a replay after a lost response is safe.
+    client_id: UUID | None = None
 
 
 class UrgeDetailRequest(BaseModel):
@@ -111,6 +115,7 @@ class UrgeOut(BaseModel):
     trigger_context: str | None = None   # only filled when details were requested / just written
     coping_strategy: str | None = None
     note: str | None = None
+    support: SupportOut | None = None   # only when the free text tripped the crisis screen
 
 
 class UrgeSummaryOut(BaseModel):

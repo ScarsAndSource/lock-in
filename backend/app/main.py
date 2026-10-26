@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -21,12 +22,15 @@ from app.routers import (
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
     study, support, tasks, urges, growth, crew, journey,
 )
+from app.observability import init_sentry, tag_request
 from app.schema_check import check_schema
 
 settings = get_settings()
+init_sentry(settings)  # before the app object exists, as Sentry recommends
 logger = logging.getLogger("lockin")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 _MAX_BODY_BYTES = 256 * 1024
+_READY_TIMEOUT_SECONDS = 5
 # The only routes that take a file. The services re-check the real size while reading, so this is just the front gate.
 _UPLOAD_BODY_BYTES = 5 * 1024 * 1024
 _UPLOAD_PATHS = frozenset({
@@ -68,6 +72,7 @@ async def request_context(request: Request, call_next):
     incoming = request.headers.get("x-request-id", "")
     request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
     request.state.request_id = request_id
+    tag_request(request_id)
     length = request.headers.get("content-length", "")
     limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
     if length.isdigit() and int(length) > limit:
@@ -156,15 +161,16 @@ async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-@app.get("/health", tags=["meta"])
+# GET and HEAD: several uptime monitors probe with HEAD, which a GET-only route answers with 405 (a false "down").
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["meta"])
 async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/ready", tags=["meta"])
+@app.api_route("/ready", methods=["GET", "HEAD"], tags=["meta"])
 async def ready():
     try:
-        await ping_database()
+        await asyncio.wait_for(ping_database(), timeout=_READY_TIMEOUT_SECONDS)  # a hung DB must read as "down", not hang the monitor
     except Exception:  # noqa: BLE001 -- logged, reported as 503
         logger.exception("Readiness check failed")
         return JSONResponse(status_code=503, content={"status": "unavailable"})

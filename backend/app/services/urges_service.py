@@ -93,9 +93,13 @@ class UrgesService:
     async def capture(
         self, user_id: UUID, outcome: UrgeOutcome, occurred_at: datetime | None = None,
         intensity: int | None = None, trigger_context: str | None = None,
-        coping_strategy: str | None = None, note: str | None = None,
+        coping_strategy: str | None = None, note: str | None = None, client_id: UUID | None = None,
     ) -> UrgeView:
         self._need()
+        if client_id is not None:
+            existing = await self._repo.get(user_id, client_id)
+            if existing is not None:  # a replay of a write that already landed
+                return self._view(existing, details=True)
         now = self._clock()
         when = occurred_at or now
         if when.tzinfo is None:
@@ -108,7 +112,7 @@ class UrgesService:
             raise ValidationError("intensity must be between 1 and 10.")
         tz_name = (await self._profiles.get(user_id)).timezone
         log = await self._repo.add(UrgeLog(
-            id=uuid4(), user_id=user_id, occurred_at=when, log_date=_local_date(when, tz_name),
+            id=client_id or uuid4(), user_id=user_id, occurred_at=when, log_date=_local_date(when, tz_name),
             outcome=outcome, intensity=intensity,
             trigger_context_encrypted=self._encrypt(trigger_context),
             coping_strategy_encrypted=self._encrypt(coping_strategy), note_encrypted=self._encrypt(note),

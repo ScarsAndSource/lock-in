@@ -61,8 +61,67 @@ function staleWhileRevalidate(event) {
   return caches.match(request).then((hit) => hit || refresh.catch(() => Response.error()));
 }
 
+// ---------------------------------------------------------------- Android share target
+// manifest.json share_target POSTs (multipart) to /share-target. A static host can't answer a POST, so the worker does:
+// it keeps the shared text / first image in IndexedDB (same database as src/lib/idb.ts: name, version and store names must match),
+// then 303-redirects to /?a=share, where the app's share sheet picks it up. Nothing is sent to the API from here:
+// the person chooses what the share is (screen time, timetable, tasks) and the app calls the existing endpoints.
+const DB_NAME = 'lockin-offline';
+const DB_VERSION = 1;
+const DB_STORES = ['queue', 'share', 'snapshot'];
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      for (const name of DB_STORES) if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putShare(record) {
+  const db = await openDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('share', 'readwrite');
+      tx.objectStore('share').put(record);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function receiveShare(request) {
+  try {
+    const form = await request.formData();
+    const field = (name) => {
+      const v = form.get(name);
+      return typeof v === 'string' ? v.trim() : '';
+    };
+    // Many apps put the same string in title and text.
+    const parts = [field('title'), field('text'), field('url')].filter(Boolean);
+    const text = parts.filter((p, i) => parts.indexOf(p) === i).join('\n').slice(0, 4000);
+    const file = form.getAll('media').find((f) => f && typeof f !== 'string' && f.size > 0 && /^image\//.test(f.type)) || null;
+    if (text || file) await putShare({ id: 'pending', at: Date.now(), text, file });
+  } catch (_) {
+    // fall through: the app opens and tells the person nothing came through
+  }
+  return Response.redirect(new URL('/?a=share', self.location.origin).href, 303);
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
+  if (request.method === 'POST') {
+    const u = new URL(request.url);
+    if (u.origin === self.location.origin && u.pathname === '/share-target') event.respondWith(receiveShare(request));
+    return;
+  }
   // Same-origin GETs only. The API lives on another origin: personal data must always be fresh and never sit in Cache Storage.
   if (request.method !== 'GET') return;
   const url = new URL(request.url);

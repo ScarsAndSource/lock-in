@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     rate_limit_chat_per_hour: int = Field(default=60, ge=1)
     chat_retention_days: int = Field(default=90, ge=0)  # stored threads idle this long are pruned; 0 = keep forever
 
+    # --- error reporting -----------------------------------------------------
+    sentry_dsn: str = ""              # empty => error reporting is off
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0, le=1)  # performance tracing; 0 = errors only
+    release: str = ""                 # shown on events; falls back to RENDER_GIT_COMMIT
+
     # --- tasks, reminders, web push -------------------------------------------
     rate_limit_capture_per_minute: int = Field(default=10, ge=1)
     rate_limit_push_test_per_hour: int = Field(default=6, ge=1)

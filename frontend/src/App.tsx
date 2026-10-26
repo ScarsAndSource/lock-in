@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -7,7 +7,9 @@ import { UrgeQuickModal } from './components/UrgeQuickModal';
 import { UrgeFab } from './components/UrgeFab';
 import { Toast } from './components/Toast';
 import { LoginScreen } from './components/LoginScreen';
+import { SyncManager } from './components/SyncManager';
 import { useDeepLink } from './lib/deepLink';
+import { readPendingShare } from './lib/share';
 
 // Each tab and sheet is its own chunk: a screen's code only downloads when it is first opened.
 const NowView = lazy(() => import('./views/NowView').then((m) => ({ default: m.NowView })));
@@ -17,6 +19,7 @@ const CrewView = lazy(() => import('./views/CrewView').then((m) => ({ default: m
 const SettingsSheet = lazy(() => import('./components/SettingsSheet').then((m) => ({ default: m.SettingsSheet })));
 const DomainSheet = lazy(() => import('./components/DomainSheet').then((m) => ({ default: m.DomainSheet })));
 const TriageSheet = lazy(() => import('./components/TriageSheet').then((m) => ({ default: m.TriageSheet })));
+const ShareSheet = lazy(() => import('./components/ShareSheet').then((m) => ({ default: m.ShareSheet })));
 const FutureSelfPlayer = lazy(() => import('./components/growth/FutureSelfPlayer').then((m) => ({ default: m.FutureSelfPlayer })));
 
 const TITLES = { now: 'Now', companion: 'Companion', mirror: 'Mirror', crew: 'Crew' } as const;
@@ -39,6 +42,7 @@ export const AppContent: React.FC = () => {
 
   const [triageOpen, setTriageOpen] = useState(false);
   const [futureId, setFutureId] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   // A notification body tap lands on /?a=<where>. Every push the companion sends names one of these, and on iPhone
   // (no lock-screen buttons) this is how the tap finishes the job. Must run before the signed-out early return.
@@ -69,10 +73,21 @@ export const AppContent: React.FC = () => {
       case 'future':
         if (params?.id) setFutureId(params.id);
         break;
+      case 'share': // the service worker stored an Android share and redirected here
+        setShareOpen(true);
+        break;
       default: // habit, focus, comeback: the Now tab shows the next thing itself
         setActiveTab('now');
     }
   });
+
+  // A share can be waiting from before a sign-in or a reload (the deep link is only read once): open it once there is a session.
+  useEffect(() => {
+    if (demoMode || !token) return;
+    void readPendingShare().then((s) => {
+      if (s) setShareOpen(true);
+    });
+  }, [token, demoMode]);
 
   // Live mode with no session: login first. Demo mode is an explicit opt-in from the login screen.
   if (!demoMode && !token) {
@@ -103,8 +118,10 @@ export const AppContent: React.FC = () => {
         {settingsOpen && <SettingsSheet />}
         {triageOpen && <TriageSheet open onClose={() => setTriageOpen(false)} />}
         {futureId && <FutureSelfPlayer id={futureId} onClose={() => setFutureId(null)} />}
+        {shareOpen && <ShareSheet onClose={() => setShareOpen(false)} />}
       </Suspense>
 
+      <SyncManager />
       <Toast />
     </div>
   );

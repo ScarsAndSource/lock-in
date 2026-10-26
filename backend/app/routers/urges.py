@@ -5,10 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.deps import get_urges_service
+from app.deps import get_profile_service, get_urges_service
 from app.ratelimit import rate_limit
 from app.schemas_tracking import UrgeCaptureRequest, UrgeDetailRequest, UrgeOut, UrgeSummaryOut
+from app.safety import is_crisis, support_payload
 from app.security import get_current_user_id
+from app.services.profile_service import ProfileService
 from app.services.urges_service import UrgesService, UrgeView
 
 router = APIRouter(prefix="/urges", tags=["urges"], dependencies=[Depends(rate_limit("api"))])
@@ -22,17 +24,28 @@ def _out(v: UrgeView) -> UrgeOut:
     )
 
 
+async def _with_support(
+    out: UrgeOut, texts: list[str | None], user_id: UUID, profiles: ProfileService,
+) -> UrgeOut:
+    """The save already went through; if the free text trips the crisis screen, attach the resources (same rule as check-ins)."""
+    if any(t and is_crisis(t) for t in texts):
+        out.support = support_payload((await profiles.get(user_id)).timezone)
+    return out
+
+
 @router.post("", response_model=UrgeOut, status_code=status.HTTP_201_CREATED)
 async def capture_urge(
     body: UrgeCaptureRequest,
     user_id: UUID = Depends(get_current_user_id),
     service: UrgesService = Depends(get_urges_service),
+    profiles: ProfileService = Depends(get_profile_service),
 ) -> UrgeOut:
     """The 2-tap path: {"outcome": "resisted"} or {"outcome": "relapsed"} is a complete log."""
-    return _out(await service.capture(
+    out = _out(await service.capture(
         user_id, body.outcome, body.occurred_at, body.intensity,
-        body.trigger_context, body.coping_strategy, body.note,
+        body.trigger_context, body.coping_strategy, body.note, body.client_id,
     ))
+    return await _with_support(out, [body.trigger_context, body.coping_strategy, body.note], user_id, profiles)
 
 
 @router.patch("/{urge_id}", response_model=UrgeOut)
@@ -41,9 +54,11 @@ async def add_urge_detail(
     body: UrgeDetailRequest,
     user_id: UUID = Depends(get_current_user_id),
     service: UrgesService = Depends(get_urges_service),
+    profiles: ProfileService = Depends(get_profile_service),
 ) -> UrgeOut:
     """Add-later detail. Only the fields you send change; null or "" clears one."""
-    return _out(await service.add_detail(user_id, urge_id, body.model_dump(exclude_unset=True)))
+    out = _out(await service.add_detail(user_id, urge_id, body.model_dump(exclude_unset=True)))
+    return await _with_support(out, [body.trigger_context, body.coping_strategy, body.note], user_id, profiles)
 
 
 @router.get("", response_model=list[UrgeOut])

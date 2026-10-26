@@ -10,6 +10,7 @@ python-multipart==0.0.9
 httpx==0.27.2
 tzdata==2024.2
 pywebpush==2.0.0
+sentry-sdk[fastapi]==2.73.0
 
 pytest==8.3.3
 pytest-asyncio==0.24.0

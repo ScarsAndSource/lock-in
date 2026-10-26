@@ -4,6 +4,7 @@
  * reads it ('lockin_auth_token'); the refresh token lives in 'lockin_session'.
  */
 import { getAuthToken, registerAuthHooks, setAuthToken, setDemoMode } from './client';
+import { purgeLocalPersonalData } from '../lib/offlineQueue';
 
 const SUPABASE_URL = ((import.meta.env.VITE_SUPABASE_URL as string | undefined) || '').replace(/\/+$/, '');
 const ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
@@ -137,6 +138,7 @@ export async function signOut(): Promise<void> {
       /* best effort: the local session is cleared regardless */
     }
   }
+  await purgeLocalPersonalData(); // cached check-in view and any pending share must not outlive the session
   writeSession(null);
   localStorage.removeItem('lockin_demo_mode');
   window.location.reload();

@@ -40,6 +40,21 @@ const CRISIS_FLAGS = [
   'marna chahta',
   'marna chahti',
   'jeene ka mann nahi',
+  // Hinglish / Devanagari heads-up. The server's screen is wider and is what decides on save.
+  'mujhe marna hai',
+  'jeena nahi chahta',
+  'jeena nhi chahti',
+  'jeene ka mann nhi',
+  'zindagi khatam',
+  'jindagi khatam',
+  'sucide',
+  'suiside',
+  'aatmhatya',
+  'आत्महत्या',
+  'खुदकुशी',
+  'मरना चाहता',
+  'मरना चाहती',
+  'जीना नहीं चाहता',
 ];
 
 const normalizeForCrisis = (text: string): string => text.toLowerCase().replace(/[\u2019'`]/g, '');
@@ -246,6 +261,12 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
         accept_screen_time_default: !screenDirty,
       });
 
+      if (result.queued) {
+        // No signal: stored on this phone, sent when the connection is back. Refreshing now would only fail.
+        showToast("Saved on this phone. It will sync when you're back online.");
+        onClose();
+        return;
+      }
       showToast(confirmed ? 'Check-in updated' : 'Locked in');
       bumpData();
       await refreshCheckinView();
@@ -332,6 +353,11 @@ export const CheckinModal: React.FC<CheckinModalProps> = ({ isOpen, onClose }) =
         <p className="font-small text-muted-text">Loading today…</p>
       ) : (
         <div className="space-y-3">
+          {checkinView.from_cache && (
+            <p className="font-caption text-caption text-muted-text">
+              Offline. This check-in is saved on your phone and sent when you're back online.
+            </p>
+          )}
           <BounceCard bounce={checkinView.bounce} />
           <CaptureBar onProposal={applyProposal} onScreenshot={applyScreenshot} />
           {captureSupport && <SupportCard support={captureSupport} />}

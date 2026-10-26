@@ -1,4 +1,5 @@
 import { request, isDemoMode } from './client';
+import { newId, sendOrQueue } from '../lib/offlineQueue';
 import {
   SleepLog,
   ScreenTimeLog,
@@ -47,7 +48,7 @@ export async function logSleep(payload: {
 export async function logScreenTime(payload: {
   log_date: string;
   total_minutes: number;
-  source?: 'manual' | 'extension';
+  source?: 'manual' | 'extension' | 'screenshot';
   category_breakdown?: Record<string, number> | null;
 }): Promise<ScreenTimeLog> {
   if (isDemoMode()) {
@@ -204,10 +205,30 @@ export async function captureUrge(payload: {
         : null;
     return newUrge;
   }
-  return request<UrgeLog>('/urges', {
-    method: 'POST',
-    body: JSON.stringify(payload),
+  // The client_id makes a replay harmless: if the first attempt reached the server but the reply was lost, the queued
+  // copy is recognised and not stored twice. The live attempt leaves occurred_at to the server's clock (a phone clock
+  // that runs fast would otherwise be refused as "in the future"); only a queued copy carries the tap time.
+  const clientId = newId();
+  const tappedAt = payload.occurred_at ?? new Date().toISOString();
+  const sent = await sendOrQueue<UrgeLog>({
+    kind: 'urge',
+    path: '/urges',
+    body: { ...payload, client_id: clientId },
+    queuedBody: { ...payload, client_id: clientId, occurred_at: tappedAt },
   });
+  if (!sent.queued) return sent.data;
+  return {
+    id: clientId,
+    occurred_at: tappedAt,
+    log_date: localTodayISO(),
+    outcome: payload.outcome,
+    intensity: payload.intensity ?? null,
+    has_detail: Boolean(payload.trigger_context || payload.coping_strategy || payload.note),
+    trigger_context: payload.trigger_context || null,
+    coping_strategy: payload.coping_strategy || null,
+    note: payload.note || null,
+    queued: true,
+  };
 }
 
 export async function getUrges(endDate: string, windowDays = 14, details = true): Promise<UrgeLog[]> {

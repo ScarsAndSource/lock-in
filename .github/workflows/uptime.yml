@@ -1,0 +1,21 @@
+# Pings the API's /ready every 10 minutes (it checks the database). A failed run emails you, which is the alert.
+# Setup: repo Settings -> Secrets and variables -> Actions -> Variables -> New: API_URL = https://your-api.example.com
+# Notes: GitHub's scheduler can run a few minutes late, and pauses scheduled workflows in a repo with no activity for 60 days.
+name: uptime
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Probe /ready
+        env:
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then echo "Set the repository variable API_URL"; exit 1; fi
+          # A sleeping free-tier host takes a while to wake: retry before calling it down.
+          curl --fail --silent --show-error --max-time 30 --retry 3 --retry-delay 20 --retry-all-errors "${API_URL%/}/ready"
