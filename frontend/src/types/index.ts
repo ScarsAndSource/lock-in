@@ -128,6 +128,8 @@ export interface UrgeLog {
   trigger_context?: string | null;
   coping_strategy?: string | null;
   note?: string | null;
+  queued?: boolean;
+  support?: SupportPayload | null;
 }
 
 export interface UrgeSummary {
@@ -180,6 +182,7 @@ export interface CheckinView {
   screen_time: ScreenTimeSection;
   bounce?: Bounce;
   mood?: MoodLog | null;
+  from_cache?: boolean;
 }
 
 export interface CheckinOverride {
@@ -227,6 +230,7 @@ export interface CheckinConfirmResponse {
   screen_time: ScreenTimeLog | null;
   mood?: MoodLog | null;
   support?: SupportPayload | null;
+  queued?: boolean;
 }
 
 export interface HabitConsistency {

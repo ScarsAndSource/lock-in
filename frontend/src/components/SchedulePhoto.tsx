@@ -148,6 +148,7 @@ export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className
       setProposal(null);
       bumpData();
       await onAdded();
+      finishAuto();
     }
   };
 
@@ -155,20 +156,24 @@ export const SchedulePhoto: React.FC<SchedulePhotoProps> = ({ onAdded, className
 
   return (
     <>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onFile(e)} />
-      <button
-        type="button"
-        aria-label="Add from a photo of a timetable or notice"
-        title="Photo of a timetable or notice"
-        disabled={disabled || reading}
-        onClick={() => fileRef.current?.click()}
-        className={
-          className ??
-          'w-10 h-10 shrink-0 rounded-xl bg-surface-container text-ink flex items-center justify-center hover:bg-secondary-fixed disabled:opacity-40'
-        }
-      >
-        <span className="material-symbols-outlined text-[20px]">{reading ? 'hourglass_top' : 'photo_camera'}</span>
-      </button>
+      {!hideButton && (
+        <>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onFile(e)} />
+          <button
+            type="button"
+            aria-label="Add from a photo of a timetable or notice"
+            title="Photo of a timetable or notice"
+            disabled={disabled || reading}
+            onClick={() => fileRef.current?.click()}
+            className={
+              className ??
+              'w-10 h-10 shrink-0 rounded-xl bg-surface-container text-ink flex items-center justify-center hover:bg-secondary-fixed disabled:opacity-40'
+            }
+          >
+            <span className="material-symbols-outlined text-[20px]">{reading ? 'hourglass_top' : 'photo_camera'}</span>
+          </button>
+        </>
+      )}
 
       <Sheet
         open={proposal !== null}

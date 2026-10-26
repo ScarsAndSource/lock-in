@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { captureUrge } from '../api/tracking';
 import { getDueIntentions } from '../api/profile';
-import { DueIntention, UrgeOutcome } from '../types';
+import { DueIntention, SupportPayload, UrgeOutcome } from '../types';
 import { errorMessage } from '../lib/format';
+import { SupportCard } from './SupportCard';
 
 interface UrgeQuickModalProps {
   isOpen: boolean;
@@ -17,12 +18,14 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
   const [copingStrategy, setCopingStrategy] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [due, setDue] = useState<DueIntention[]>([]);
+  const [support, setSupport] = useState<SupportPayload | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     setIntensity(6);
     setTriggerContext('');
     setCopingStrategy('');
+    setSupport(null);
     getDueIntentions('urge')
       .then(setDue)
       .catch(() => setDue([]));
@@ -34,14 +37,16 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
     setIsSubmitting(true);
     try {
       const hasDetail = Boolean(triggerContext.trim() || copingStrategy.trim());
-      await captureUrge({
+      const saved = await captureUrge({
         outcome: selectedOutcome,
         intensity: hasDetail ? intensity : null,
         trigger_context: triggerContext.trim() || null,
         coping_strategy: copingStrategy.trim() || null,
       });
+      if (saved.queued) { showToast('Urge queued — will sync when back online.'); return; }
+      if (saved.support) { setSupport(saved.support); return; }
       bumpData();
-      showToast(`Urge logged: ${selectedOutcome}`);
+      showToast(Urge logged: ${selectedOutcome});
       onClose();
     } catch (err) {
       showToast(errorMessage(err, 'Could not log urge'));
@@ -49,6 +54,16 @@ export const UrgeQuickModal: React.FC<UrgeQuickModalProps> = ({ isOpen, onClose 
       setIsSubmitting(false);
     }
   };
+
+  if (support) {
+    return (
+      <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+        <div className="w-full max-w-md bg-ground-chalk rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl border border-line animate-slideUp space-y-4">
+          <SupportCard payload={support} onDismiss={() => { setSupport(null); onClose(); }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">

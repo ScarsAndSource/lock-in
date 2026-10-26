@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { isDemoMode, setDemoMode, getAuthToken, setAuthToken } from '../api/client';
+import { ApiError } from '../api/client';
 import { getCheckinDefaults } from '../api/checkins';
 import { getProfile } from '../api/profile';
 import { CheckinView, Profile } from '../types';
@@ -50,6 +51,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [token, setTokenState] = useState<string | null>(getAuthToken());
   const [profile, setProfile] = useState<Profile | null>(null);
   const [checkinView, setCheckinView] = useState<CheckinView | null>(null);
+  const checkinViewRef = useRef<CheckinView | null>(null);
+  checkinViewRef.current = checkinView;
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [dataEpoch, setDataEpoch] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -95,6 +98,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setCheckinView(view);
     } catch (err) {
       if (seq !== checkinSeq.current) return;
+      if (err instanceof ApiError && err.status === 0 && checkinViewRef.current) return;
       setCheckinView(null);
       if (!isDemoMode()) {
         showToast(errorMessage(err, 'Could not load today’s check-in'));

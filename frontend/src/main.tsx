@@ -5,10 +5,12 @@ import { CrewProvider } from './context/CrewContext';
 import { MarutiProvider } from './components/maruti/MarutiContext';
 import { AppContent } from './App';
 import { startAuth } from './api/auth';
+import { initMonitoring } from './lib/monitoring';
 import './index.css';
 
 // Adopt a session from an email-confirmation / magic link and register token refresh BEFORE anything renders.
 startAuth();
+initMonitoring();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
