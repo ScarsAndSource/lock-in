@@ -34,6 +34,23 @@ class Settings(BaseSettings):
     rate_limit_export_per_hour: int = Field(default=5, ge=1)
     rate_limit_insights_refresh_per_hour: int = Field(default=10, ge=1)
 
+    # --- Redis (shared limits, locks, idempotency, kill-switch, breaker) -----
+    # Empty REDIS_URL => everything falls back to the in-process behaviour (one instance = exact).
+    # Redis is treated as a volatile cache: nothing here may be the only copy of something that matters.
+    redis_url: str = ""  # redis://... or rediss://... (TLS)
+    redis_socket_timeout_seconds: float = Field(default=0.15, gt=0, le=2)    # a slow Redis must never slow the app
+    redis_connect_timeout_seconds: float = Field(default=0.5, gt=0, le=5)
+    redis_max_connections: int = Field(default=20, ge=1)
+
+    # One chat turn in flight per user. Must outlast the slowest legitimate turn (planner + answer + a retry).
+    chat_inflight_lock_seconds: int = Field(default=40, ge=0, le=300)  # 0 = lock off
+    idempotency_ttl_seconds: int = Field(default=120, ge=10, le=3600)  # how long a finished reply can be replayed
+
+    # Circuit breaker on the AI provider: N failures inside the window opens it for the cooldown.
+    ai_breaker_failures: int = Field(default=5, ge=1)
+    ai_breaker_window_seconds: int = Field(default=30, ge=1)
+    ai_breaker_cooldown_seconds: int = Field(default=20, ge=1)
+
     # --- LLM (Groq) -------------------------------------------------------
     groq_api_key: str = ""  # empty => every narration falls back to deterministic text
     groq_model: str = "llama-3.3-70b-versatile"  # check Groq's current model list before deploy
@@ -76,8 +93,6 @@ class Settings(BaseSettings):
             "fcm.googleapis.com", "push.services.mozilla.com", "push.apple.com", "notify.windows.com",
         ]
     )
-
-
 
     @model_validator(mode="after")
     def _check_auth_config(self) -> "Settings":

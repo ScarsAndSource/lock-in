@@ -1,9 +1,11 @@
 """
 LLM layer.
 GroqClient real OpenAI-compatible chat call over httpx, JSON mode on (every prompt here returns JSON).
-BudgetedLLM wraps any client and enforces the per-user DAILY call cap via llm_usage.
-Failure model: LLMUnavailableError (down, timeout, not configured, auth) and LLMError (malformed reply)
-both mean "use the deterministic fallback".
+BudgetedLLM wraps any client and, before every call: (1) asks the kill-switch/breaker (limits/aigate.py) whether the
+AI may be called at all, (2) charges the chat turn if the request is inside a turn_scope (limits/turn.py), and
+(3) enforces the per-user DAILY call cap via llm_usage.
+Failure model: LLMUnavailableError (down, timeout, not configured, auth, switched off, breaker open) and LLMError
+(malformed reply) both mean "use the deterministic fallback".
 LLMBudgetExceeded is an LLMError, so narrators fall back on it too; chat turns it into a 429.
 Privacy: prompts, completions and the key are never logged.
 """
@@ -20,6 +22,8 @@ from uuid import UUID
 import httpx
 
 from app.dates import Clock, utc_now
+from app.limits import aigate
+from app.limits.turn import current_turn
 from app.repositories.llm_usage_repository import LlmUsageRepository
 
 logger = logging.getLogger("lockin.llm")
@@ -33,7 +37,7 @@ class LLMError(Exception):
 
 
 class LLMUnavailableError(LLMError):
-    """The LLM endpoint is down, timed out, rejected us, or isn't configured."""
+    """The LLM endpoint is down, timed out, rejected us, isn't configured, or has been switched off."""
 
 
 class LLMValidationError(LLMError):
@@ -194,10 +198,15 @@ def seconds_until_reset(now: datetime) -> int:
 
 class BudgetedLLM:
     """
-    Per-user daily cap. consume() is an atomic upsert-increment; if the day's total goes
-    over the cap the call is refunded and LLMBudgetExceeded is raised.
-    A call that failed because Groq was unavailable is refunded too, so outages never burn
-    someone's allowance.
+    Gate in front of every model call, in this order:
+      1. kill-switch / breaker (aigate): refused calls raise LLMUnavailableError BEFORE anything is spent or charged,
+         so a paused AI costs the person no quota and no daily-cap slot
+      2. the chat turn, if this request is inside a turn_scope: takes the per-user lock and spends ONE rate slot,
+         once per request however many model calls the turn makes (can raise ConflictError / RateLimitedError)
+      3. per-user daily cap. consume() is an atomic upsert-increment; if the day's total goes over the cap the call is
+         refunded and LLMBudgetExceeded is raised.
+    A call that failed because Groq was unavailable is refunded too, so outages never burn someone's allowance, and
+    it is reported to the breaker.
     """
 
     def __init__(
@@ -220,6 +229,14 @@ class BudgetedLLM:
         return BudgetedLLM(self._inner, self._usage, self._user_id, self._cap, feature, self._clock)
 
     async def _metered(self, call: Callable[[], Awaitable[str]]) -> str:
+        reason = await aigate.blocked_reason(self._user_id)
+        if reason is not None:
+            raise LLMUnavailableError(f"AI is switched off right now ({reason}).")
+
+        turn = current_turn.get()
+        if turn is not None:
+            await turn.charge()
+
         day = self._clock().astimezone(timezone.utc).date()
         total = await self._usage.consume(self._user_id, day, self._feature)
         if total > self._cap:
@@ -229,7 +246,9 @@ class BudgetedLLM:
             text = await call()
         except LLMUnavailableError:
             await self._usage.release(self._user_id, day, self._feature)
+            await aigate.record_failure()
             raise
+        aigate.record_success()
         tokens = getattr(self._inner, "last_tokens", 0)
         if tokens:
             await self._usage.add_tokens(self._user_id, day, self._feature, tokens)

@@ -1,10 +1,14 @@
 """
-Per-user sliding-window rate limiting (in-memory).
+Per-user rate limiting.
 
-Scope, stated plainly: state lives in this process. One Render instance = exact.
-Several workers/instances = each enforces its own window (limit is multiplied).
-When the Groq endpoints land, swap SlidingWindowLimiter for a Redis-backed one
-with the same .check() signature. Pre-auth abuse is not covered here (put
+Two layers, same call signatures as before:
+  * rate_limit(bucket, ...)  the FastAPI dependency. The cheap, high-volume "api" bucket stays in-process (a Redis
+    round trip on every request buys nothing for it). Every other bucket (chat is handled in limits/turn.py,
+    media, capture, export, calendar import, ...) is a Redis GCRA bucket, shared across instances and restarts.
+  * SlidingWindowLimiter     the in-process limiter. It is the fallback whenever Redis is unset or unreachable,
+    so with no REDIS_URL behaviour is exactly what it was.
+
+Scope, stated plainly: the in-process state lives in this process. Pre-auth abuse is not covered here (put
 Cloudflare/Render protections in front for that).
 """
 from __future__ import annotations
@@ -20,6 +24,7 @@ from fastapi import Depends
 
 from app.config import Settings, get_settings
 from app.exceptions import RateLimitedError
+from app.limits import gcra
 from app.security import get_current_user_id
 
 
@@ -58,6 +63,9 @@ class SlidingWindowLimiter:
 
 _limiter = SlidingWindowLimiter()
 
+# Buckets that stay in-process even when Redis is configured.
+_LOCAL_ONLY = frozenset({"api"})
+
 
 def get_limiter() -> SlidingWindowLimiter:
     return _limiter
@@ -76,14 +84,24 @@ def enforce_media_limits(user_id: UUID, settings: Settings) -> None:
             raise RateLimitedError(retry_after)
 
 
-def rate_limit(bucket: str, *, limit_setting: str = "rate_limit_per_minute", window_seconds: int = 60):
+def rate_limit(
+    bucket: str,
+    *,
+    limit_setting: str = "rate_limit_per_minute",
+    window_seconds: int = 60,
+    burst: int | None = None,
+):
     async def _dependency(
         user_id: UUID = Depends(get_current_user_id),
         settings: Settings = Depends(get_settings),
     ) -> None:
         if not settings.rate_limit_enabled:
             return
-        retry_after = get_limiter().check(f"{bucket}:{user_id}", getattr(settings, limit_setting), window_seconds)
+        limit = getattr(settings, limit_setting)
+        if bucket in _LOCAL_ONLY:
+            retry_after = get_limiter().check(f"{bucket}:{user_id}", limit, window_seconds)
+        else:
+            retry_after = await gcra.check(str(user_id), [gcra.Bucket(bucket, limit, window_seconds, burst)])
         if retry_after is not None:
             raise RateLimitedError(retry_after)
 
