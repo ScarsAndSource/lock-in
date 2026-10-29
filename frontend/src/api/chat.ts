@@ -7,6 +7,14 @@ const localMessages: Record<string, ChatMessage[]> = {
   'thread-1': [...INITIAL_CHAT_MESSAGES],
 };
 
+/** One key per send. The server uses it so a retry of THIS send returns the same reply instead of asking the model again. */
+function newIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export async function getChatThreads(): Promise<Thread[]> {
   if (isDemoMode()) return localThreads;
   return request<Thread[]>('/chat/threads');
@@ -84,6 +92,7 @@ export async function sendMessage(
 
   return request('/chat/messages', {
     method: 'POST',
+    headers: { 'Idempotency-Key': newIdempotencyKey() },
     body: JSON.stringify({ message, thread_id: threadId || null }),
   });
 }

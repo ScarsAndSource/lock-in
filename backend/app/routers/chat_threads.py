@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from app.config import Settings, get_settings
 from app.deps import get_chat_threads_service
+from app.limits.idempotency import Idempotency
+from app.limits.turn import turn_scope
 from app.ratelimit import rate_limit
-from app.routers.chat import _enforce_chat_limits
 from app.schemas_chat import ActionCardOut, SupportOut
 from app.schemas_threads import (
     DeletedOut, MessageOut, RenameThreadRequest, SendMessageOut, SendMessageRequest,
@@ -49,25 +51,44 @@ def _message_out(v: MessageView) -> MessageOut:
     )
 
 
+def _fingerprint(body: SendMessageRequest) -> str:
+    """What makes two requests 'the same message' for Idempotency-Key purposes."""
+    raw = f"{body.thread_id or ''}\x00{body.message}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 @router.post("/messages", response_model=SendMessageOut)
 async def send_message(
     body: SendMessageRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user_id: UUID = Depends(get_current_user_id),
     settings: Settings = Depends(get_settings),
     service: ChatThreadsService = Depends(get_chat_threads_service),
 ) -> SendMessageOut:
     """Omit thread_id to start a conversation. Stored encrypted; the server loads the history itself.
-    Chat rate limits apply only when the model is actually called -- never to the crisis/support path."""
-    r = await service.send(
-        user_id, body.message, body.thread_id,
-        before_model=lambda: _enforce_chat_limits(user_id, settings)
-    )
-    return SendMessageOut(
-        thread=_thread_out(r.thread),
-        user_message=_message_out(r.user_message),
-        reply=_message_out(r.reply),
-        support=SupportOut.model_validate(r.support) if r.support else None,
-    )
+
+    Idempotency-Key (optional): a repeat of the same request returns the SAME reply without another model call or
+    another stored message. The turn (per-user lock + one rate slot) is charged only when the model is actually
+    called -- never on the crisis/support path."""
+    idem = Idempotency(user_id, idempotency_key, _fingerprint(body), settings)
+    replay = await idem.begin()
+    if replay is not None:
+        return SendMessageOut.model_validate_json(replay)
+
+    try:
+        async with turn_scope(user_id, settings):
+            r = await service.send(user_id, body.message, body.thread_id)
+        out = SendMessageOut(
+            thread=_thread_out(r.thread),
+            user_message=_message_out(r.user_message),
+            reply=_message_out(r.reply),
+            support=SupportOut.model_validate(r.support) if r.support else None,
+        )
+    except BaseException:
+        await idem.abort()   # a refused or failed attempt must not block the client's retry
+        raise
+    await idem.complete(out.model_dump_json())
+    return out
 
 
 @router.get("/threads", response_model=list[ThreadOut])
