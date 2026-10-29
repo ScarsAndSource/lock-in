@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     ai_breaker_window_seconds: int = Field(default=30, ge=1)
     ai_breaker_cooldown_seconds: int = Field(default=20, ge=1)
 
+    # --- caching, weighted AI budget, audio limits ----------------------------
+    facts_cache_ttl_seconds: int = Field(default=60, ge=0, le=900)      # 0 = off. Data-version invalidation does the real work; this is the safety net
+    answer_cache_ttl_seconds: int = Field(default=600, ge=0, le=3600)   # 0 = off
+    media_cache_ttl_seconds: int = Field(default=600, ge=0, le=3600)    # 0 = off
+    llm_daily_unit_cap: int = Field(default=120, ge=0)                  # weighted calls per user per UTC day (text 1, audio 2, vision 3); 0 = off
+    llm_daily_token_cap: int = Field(default=200_000, ge=0)             # provider tokens per user per UTC day; 0 = off
+    max_audio_seconds: int = Field(default=75, ge=5, le=600)
+
     # --- LLM (Groq) -------------------------------------------------------
     groq_api_key: str = ""  # empty => every narration falls back to deterministic text
     groq_model: str = "llama-3.3-70b-versatile"  # check Groq's current model list before deploy
