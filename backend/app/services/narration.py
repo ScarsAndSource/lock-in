@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
+from app.guard.canon import canonicalize
 from app.services.llm import LLMClient
 
 _BANNED_PHRASES = re.compile(
@@ -65,6 +67,7 @@ def _validate(
     check_numbers: bool = False,
     allowed_days: set[str] | None = None,
     extra_banned: re.Pattern[str] | None = None,
+    output_check: Callable[[str, str], bool] | None = None,
 ) -> NarrationResult | None:
     """Parse and validate the LLM JSON response. Returns None on any failure."""
     data = _load_json(raw)
@@ -82,6 +85,8 @@ def _validate(
     if not tone_ok(obs, step):
         return None
     if extra_banned is not None and extra_banned.search(f"{obs} {step}".replace("\u2019", "'")):
+        return None
+    if output_check is not None and not output_check(obs, step):
         return None
     if require_dates and not cited:
         return None
@@ -116,6 +121,7 @@ async def narrate_structured(
     check_numbers: bool = False,
     allowed_days: set[str] | None = None,
     extra_banned: re.Pattern[str] | None = None,
+    output_check: Callable[[str, str], bool] | None = None,
 ) -> tuple[NarrationResult | None, str]:
     """(result, raw_response). LLMError propagates (callers fall back). None result = failed validation."""
     last_raw = ""
@@ -132,6 +138,7 @@ async def narrate_structured(
             check_numbers=check_numbers,
             allowed_days=allowed_days,
             extra_banned=extra_banned,
+            output_check=output_check,
         )
         if result is not None:
             return result, raw
@@ -140,11 +147,7 @@ async def narrate_structured(
 
 def sanitize_user_text(text: str, max_len: int, *, single_line: bool = False) -> str:
     """Strip control chars and angle brackets (no tag breakout), optionally one line, truncate."""
-    out = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text)
-    out = out.replace("<", "").replace(">", "")
-    if single_line:
-        out = re.sub(r"\s+", " ", out).strip()
-    return out[:max_len]
+    return canonicalize(text, max_len, single_line=single_line)
 
 
 def fallback_next_step(pattern_key: str) -> str:

@@ -7,6 +7,8 @@ tone across versions).
 """
 from __future__ import annotations
 
+from app.guard.output import canary_line
+
 VOICE_VERSION = "v3"
 
 _RULES = """\
@@ -167,4 +169,9 @@ def insight_system_prompt(tone: str = "direct") -> str:
 
 
 def chat_system_prompt(tone: str = "direct") -> str:
-    return f"{render_voice(tone)}\n\n{CHAT_TASK}"
+    return f"{render_voice(tone)}\n\n{CHAT_TASK}\n\n{canary_line()}"
+
+
+def chat_leak_text() -> str:
+    """What a chat reply must never repeat: rules and task, not the public style examples."""
+    return f"{_RULES}\n{CHAT_TASK}"
