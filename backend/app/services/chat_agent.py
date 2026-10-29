@@ -26,6 +26,7 @@ from datetime import date, datetime, time, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
+from app.cache import data_version
 from app.dates import Clock, utc_now
 from app.domain import GOAL_DOMAINS, HabitLog, HabitStatus, SleepLog
 from app.exceptions import ConflictError, DailyLimitError, NotFoundError, ValidationError
@@ -306,6 +307,7 @@ class AgentExecutor:
         return AgentContext(now, tz, profile.timezone, now.astimezone(tz).date(), habits, tasks)
 
     async def apply(self, user_id: UUID, planned: PlannedAction, *, confirmed: bool) -> ActionCard:
+        data_version.mark_dirty()   # this request may write: no cached evidence for the rest of it; get_db bumps after commit
         card_id = uuid4().hex[:12]
         needs_ok = planned.tool in ALWAYS_CONFIRM or planned.ambiguous is not None
         if needs_ok and not confirmed:

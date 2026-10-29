@@ -28,6 +28,8 @@ from app.safety import SUPPORT_MESSAGE, conversation_has_crisis, support_payload
 from app.services.chat_facts import build_chat_facts, fact_days, fallback_digest
 from app.services.goals_service import GoalsService
 from app.services.llm import LLMBudgetExceeded, LLMClient, LLMError, seconds_until_reset
+from app.cache import answers as answer_cache
+from app.cache import facts as facts_cache
 from app.services.missions_service import MissionsService
 from app.services.narration import narrate_structured, sanitize_user_text
 from app.services.profile_service import ProfileService
@@ -131,6 +133,17 @@ class ChatService:
             messages.append({"role": "system", "content": CONTAINED_REMINDER})
         messages.append({"role": "user", "content": f"<user_question>{question}</user_question>"})
 
+        cached = await answer_cache.get(user_id, messages, self._llm.model)
+        if cached is not None:
+            return ChatReply(
+                mode="answer",
+                reply=cached.observation,
+                next_step=cached.next_step,
+                cited_days=cached.cited_days,
+                narrated=True,
+                model=self._llm.model,
+            )
+
         if before_model is not None:
             before_model()
 
@@ -165,6 +178,8 @@ class ChatService:
         if narration is None:
             return ChatReply(mode="fallback", reply=fallback_digest(facts), flags=flags)
 
+        await answer_cache.put(user_id, messages, self._llm.model, narration)
+
         return ChatReply(
             mode="answer",
             reply=narration.observation,
@@ -176,6 +191,10 @@ class ChatService:
         )
 
     async def _gather(self, user_id: UUID) -> dict:
+        """The evidence pack, through the per-user cache (invalidated by any committed write)."""
+        return await facts_cache.get_or_build(user_id, lambda: self._gather_uncached(user_id))
+
+    async def _gather_uncached(self, user_id: UUID) -> dict:
         end, days = await self._stats.chain(user_id, None, 14)
         _, habit_items, _ = await self._stats.consistency(user_id, end, 30)
         _, patterns = await self._stats.patterns(user_id, end, 30)

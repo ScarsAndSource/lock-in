@@ -13,9 +13,11 @@ import logging
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from app.config import get_settings
 from app.dates import Clock, utc_now
 from app.exceptions import DailyLimitError, ServiceUnavailableError, ValidationError
 from app.safety import is_crisis, support_payload
+from app.services.audio_sniff import inspect_audio
 from app.services.checkin_parser import MAX_SPEECH_CHARS, ParsedCheckin, build_messages, parse_reply
 from app.services.habits_service import HabitsService
 from app.services.llm import LLMBudgetExceeded, LLMError, MediaLLM, seconds_until_reset
@@ -77,7 +79,12 @@ class MediaService:
             raise ValidationError("The recording was empty.")
         if len(audio) > MAX_AUDIO_BYTES:
             raise ValidationError("That recording is too long. Keep it under about a minute.")
-        text = await self._guard(lambda: self._llm.transcribe(audio, filename, base))
+        info = inspect_audio(audio)   # what the bytes ARE, not what the client said
+        if info is None:
+            raise ValidationError("That doesn't look like an audio recording.")
+        if info.seconds is not None and info.seconds > get_settings().max_audio_seconds:
+            raise ValidationError("That recording is too long. Keep it under about a minute.")
+        text = await self._guard(lambda: self._llm.transcribe(audio, info.filename, info.content_type))
         if not text.strip():
             raise ValidationError("I couldn't hear anything. Try again a bit closer to the mic.")
         return await self.parse_text(user_id, text)

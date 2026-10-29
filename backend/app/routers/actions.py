@@ -16,6 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.cache import data_version
 from app.config import Settings, get_settings
 from app.dates import Clock
 from app.db import AsyncSessionLocal, apply_rls_context
@@ -43,6 +44,7 @@ def get_actions_factory(settings: Settings = Depends(get_settings), clock: Clock
                 if settings.rls_enforced:
                     await apply_rls_context(session, user_id)
                 yield build_stack(session, settings, clock).actions
+            await data_version.bump(user_id)   # committed: this user's cached evidence is stale
 
     return factory
 

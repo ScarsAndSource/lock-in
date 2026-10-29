@@ -1,9 +1,10 @@
 """
 LLM layer.
 GroqClient real OpenAI-compatible chat call over httpx, JSON mode on (every prompt here returns JSON).
-BudgetedLLM wraps any client and, before every call: (1) asks the kill-switch/breaker (limits/aigate.py) whether the
-AI may be called at all, (2) charges the chat turn if the request is inside a turn_scope (limits/turn.py), and
-(3) enforces the per-user DAILY call cap via llm_usage.
+BudgetedLLM wraps any client. Media calls (audio, images) are deduplicated first: the same bytes within a few minutes
+return the cached raw text for free. Every real call then passes, in order: (1) the kill-switch/breaker
+(limits/aigate.py), (2) the chat turn if the request is inside a turn_scope (limits/turn.py), (3) the weighted Redis
+budget (limits/budget.py: units + tokens per day), (4) the per-user DAILY call cap via llm_usage.
 Failure model: LLMUnavailableError (down, timeout, not configured, auth, switched off, breaker open) and LLMError
 (malformed reply) both mean "use the deterministic fallback".
 LLMBudgetExceeded is an LLMError, so narrators fall back on it too; chat turns it into a 429.
@@ -21,8 +22,9 @@ from uuid import UUID
 
 import httpx
 
+from app.cache import media as media_cache
 from app.dates import Clock, utc_now
-from app.limits import aigate
+from app.limits import aigate, budget
 from app.limits.turn import current_turn
 from app.repositories.llm_usage_repository import LlmUsageRepository
 
@@ -45,7 +47,7 @@ class LLMValidationError(LLMError):
 
 
 class LLMBudgetExceeded(LLMError):
-    """The user's daily AI-call cap is used up."""
+    """The user's daily AI allowance (calls, weighted units or tokens) is used up."""
 
 
 class LLMClient(Protocol):
@@ -199,14 +201,16 @@ def seconds_until_reset(now: datetime) -> int:
 class BudgetedLLM:
     """
     Gate in front of every model call, in this order:
+      0. media only: the same bytes seen in the last few minutes return the cached text (free, no gate, no cap slot)
       1. kill-switch / breaker (aigate): refused calls raise LLMUnavailableError BEFORE anything is spent or charged,
          so a paused AI costs the person no quota and no daily-cap slot
       2. the chat turn, if this request is inside a turn_scope: takes the per-user lock and spends ONE rate slot,
          once per request however many model calls the turn makes (can raise ConflictError / RateLimitedError)
-      3. per-user daily cap. consume() is an atomic upsert-increment; if the day's total goes over the cap the call is
-         refunded and LLMBudgetExceeded is raised.
-    A call that failed because Groq was unavailable is refunded too, so outages never burn someone's allowance, and
-    it is reported to the breaker.
+      3. weighted Redis budget (budget.py): units reserved atomically, tokens checked against the day's total
+      4. per-user daily call cap. consume() is an atomic upsert-increment; if the day's total goes over the cap the call
+         is refunded and LLMBudgetExceeded is raised.
+    A call that failed because Groq was unavailable is refunded everywhere, so outages never burn someone's allowance,
+    and it is reported to the breaker.
     """
 
     def __init__(
@@ -228,7 +232,7 @@ class BudgetedLLM:
     def for_feature(self, feature: str) -> "BudgetedLLM":
         return BudgetedLLM(self._inner, self._usage, self._user_id, self._cap, feature, self._clock)
 
-    async def _metered(self, call: Callable[[], Awaitable[str]]) -> str:
+    async def _metered(self, call: Callable[[], Awaitable[str]], weight: int = budget.WEIGHT_TEXT) -> str:
         reason = await aigate.blocked_reason(self._user_id)
         if reason is not None:
             raise LLMUnavailableError(f"AI is switched off right now ({reason}).")
@@ -238,34 +242,61 @@ class BudgetedLLM:
             await turn.charge()
 
         day = self._clock().astimezone(timezone.utc).date()
+        over = await budget.reserve(self._user_id, day, weight)
+        if over is not None:
+            raise LLMBudgetExceeded(f"Daily AI {over} limit reached.")
+
         total = await self._usage.consume(self._user_id, day, self._feature)
         if total > self._cap:
             await self._usage.release(self._user_id, day, self._feature)
+            await budget.refund(self._user_id, day, weight)
             raise LLMBudgetExceeded("Daily AI limit reached.")
         try:
             text = await call()
         except LLMUnavailableError:
             await self._usage.release(self._user_id, day, self._feature)
+            await budget.refund(self._user_id, day, weight)
             await aigate.record_failure()
             raise
         aigate.record_success()
         tokens = getattr(self._inner, "last_tokens", 0)
         if tokens:
             await self._usage.add_tokens(self._user_id, day, self._feature, tokens)
+            await budget.add_tokens(self._user_id, day, tokens)
         return text
 
     async def complete(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.3) -> str:
         return await self._metered(
-            lambda: self._inner.complete(messages, max_tokens=max_tokens, temperature=temperature)
+            lambda: self._inner.complete(messages, max_tokens=max_tokens, temperature=temperature),
+            budget.WEIGHT_TEXT,
         )
 
     async def transcribe(self, audio: bytes, filename: str, content_type: str) -> str:
-        return await self._metered(lambda: self._inner.transcribe(audio, filename, content_type))
+        ck = media_cache.fingerprint(
+            self._user_id, "stt", audio, filename, content_type, getattr(self._inner, "transcribe_model", ""),
+        )
+        hit = await media_cache.get(ck)
+        if hit is not None:
+            return hit
+        text = await self._metered(
+            lambda: self._inner.transcribe(audio, filename, content_type), budget.WEIGHT_AUDIO,
+        )
+        await media_cache.put(ck, text)
+        return text
 
     async def describe_image(self, image: bytes, media_type: str, prompt: str, *, max_tokens: int = 400) -> str:
-        return await self._metered(
-            lambda: self._inner.describe_image(image, media_type, prompt, max_tokens=max_tokens)
+        ck = media_cache.fingerprint(
+            self._user_id, "img", image, media_type, prompt, str(max_tokens), getattr(self._inner, "vision_model", ""),
         )
+        hit = await media_cache.get(ck)
+        if hit is not None:
+            return hit
+        text = await self._metered(
+            lambda: self._inner.describe_image(image, media_type, prompt, max_tokens=max_tokens),
+            budget.WEIGHT_VISION,
+        )
+        await media_cache.put(ck, text)
+        return text
 
 
 def scoped(llm: LLMClient, feature: str) -> LLMClient:
