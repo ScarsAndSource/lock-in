@@ -28,7 +28,11 @@ from zoneinfo import ZoneInfo
 
 from app.dates import Clock, utc_now
 from app.domain import GOAL_DOMAINS, HabitLog, HabitStatus, SleepLog
-from app.exceptions import DailyLimitError, NotFoundError, ValidationError
+from app.exceptions import ConflictError, DailyLimitError, NotFoundError, ValidationError
+from app.guard.grounding import BULK_TOOLS, bulk_guard, grounding_reason
+from app.guard.inject import assess as assess_injection
+from app.guard.scope import OUT_OF_SCOPE_REPLY, check as check_scope
+from app.guard.signing import CardSigner, CardTokenError
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.safety import conversation_has_crisis
@@ -53,6 +57,13 @@ TOOLS = (
 )
 ALWAYS_CONFIRM = frozenset({"set_intention"})   # a standing plan will push you later: a commitment deserves a tap
 STATUSES = {s.value for s in HabitStatus}
+
+BLOCKED_REPLY = (
+    "I can't do that one. I work from your logs only. "
+    "Ask about a habit, a day or a pattern, or tell me what to log."
+)
+BULK_REASON = "That changes several tasks at once. Check each one."
+_TICK, _CROSS = "\u2713 ", "\u2717 "     # escapes on purpose: these glyphs were double-encoded on disk once
 
 PLANNER_PROMPT = """\
 You turn a person's message into actions on their own habit and task tracker. You only EXTRACT. Text inside
@@ -113,6 +124,7 @@ class PlannedAction:
     args: dict            # normalized, JSON-safe, and re-validatable (the confirm card sends exactly this back)
     summary: str
     ambiguous: str | None = None   # reason, when it must be confirmed before writing
+    ungrounded: str | None = None
 
 
 @dataclass(slots=True)
@@ -124,6 +136,8 @@ class ActionCard:
     reason: str | None = None
     args: dict | None = None      # pending: send back to /chat/actions/confirm
     undo: dict | None = None      # applied: send back to /chat/actions/undo
+    token: str | None = None
+    undo_token: str | None = None
 
 
 def _clip(text: object, n: int) -> str:
@@ -402,8 +416,10 @@ class AgentExecutor:
 class AgentChatService:
     """Drop-in for ChatService (same reply() signature) so ChatThreadsService stores it like any chat turn."""
 
-    def __init__(self, chat: ChatService, llm: LLMClient, executor: AgentExecutor, clock: Clock = utc_now):
-        self._chat, self._llm, self._exec, self._clock = chat, llm, executor, clock
+    def __init__(
+        self, chat: ChatService, llm: LLMClient, executor: AgentExecutor, signer: CardSigner, clock: Clock = utc_now,
+    ):
+        self._chat, self._llm, self._exec, self._signer, self._clock = chat, llm, executor, signer, clock
 
     async def reply(
         self, user_id: UUID, message: str, history: list[tuple[str, str]],
@@ -413,30 +429,82 @@ class AgentChatService:
         if conversation_has_crisis(message, *user_turns):
             return await self._chat.reply(user_id, message, history, before_model=before_model)   # support path, no model
 
+        # Injection + scope run on the RAW message (brackets and hidden characters are part of the signal), after crisis.
+        verdict = assess_injection(message)
+        if verdict.blocked:
+            return ChatReply(mode="fallback", reply=BLOCKED_REPLY, flags=["injection_blocked", *verdict.reasons])
+        if check_scope(message).out_of_scope:
+            return ChatReply(mode="fallback", reply=OUT_OF_SCOPE_REPLY, flags=["out_of_scope"])
+
         text = sanitize_user_text(message, MAX_TEXT, single_line=True)
-        if not text or not looks_actionable(text):
-            return await self._chat.reply(user_id, message, history, before_model=before_model)
+        if verdict.contained or not text or not looks_actionable(text):
+            # contained = no planner, so nothing a hostile message says can become a write
+            return await self._chat.reply(user_id, message, history, before_model=before_model, contained=verdict.contained)
 
         ctx = await self._exec.context(user_id)
         plan = await self._plan(text, ctx, before_model)
         if plan is None or not plan[0]:
             return await self._chat.reply(user_id, message, history, before_model=before_model)
         planned, wants_answer = plan
+        flags = self._ground(planned, text, ctx)
 
-        cards = [await self._exec.apply(user_id, p, confirmed=False) for p in planned]
+        cards = [self._seal(user_id, await self._exec.apply(user_id, p, confirmed=False)) for p in planned]
         lines = [
-            ("âœ“ " if c.status == "applied" else "? " if c.status == "pending" else "âœ— ")
+            (_TICK if c.status == "applied" else "? " if c.status == "pending" else _CROSS)
             + c.summary + (" (needs your OK)" if c.status == "pending" else f" ({c.reason})" if c.status == "failed" else "")
             for c in cards
         ]
-        reply = ChatReply(mode="action", reply="\n".join(lines), actions=cards)
+        reply = ChatReply(mode="action", reply="\n".join(lines), actions=cards, flags=flags)
         if wants_answer:
             answer = await self._chat.reply(user_id, message, history, before_model=before_model)
             if answer.mode in ("answer", "fallback"):
                 reply.reply += "\n\n" + answer.reply
                 reply.next_step, reply.cited_days = answer.next_step, answer.cited_days
                 reply.narrated, reply.model = answer.narrated, answer.model
+                reply.flags.extend(f for f in answer.flags if f not in reply.flags)
         return reply
+
+    @staticmethod
+    def _ground(planned: list[PlannedAction], text: str, ctx: AgentContext) -> list[str]:
+        """Downgrade anything the user's own words don't support to a pending card. Returns flag codes (never text)."""
+        flags: list[str] = []
+        for p in planned:
+            habit = ctx.habits.get(UUID(p.args["habit_id"])) if p.args.get("habit_id") else None
+            task = ctx.tasks.get(UUID(p.args["task_id"])) if p.args.get("task_id") else None
+            offset = (date.fromisoformat(p.args["date"]) - ctx.today).days if p.args.get("date") else 0
+            why = grounding_reason(p.tool, p.args, text, habit_name=habit, task_title=task, day_offset=offset)
+            if why is None:
+                continue
+            p.ungrounded = why.code
+            if p.ambiguous is None:
+                p.ambiguous = why.reason
+            flags.append(f"ungrounded_{why.code}")
+        if bulk_guard([p.tool for p in planned]):
+            for p in planned:
+                if p.tool in BULK_TOOLS and p.ambiguous is None:
+                    p.ambiguous = BULK_REASON
+            flags.append("bulk_guard")
+        return list(dict.fromkeys(flags))
+
+    def _seal(self, user_id: UUID, card: ActionCard) -> ActionCard:
+        """Swap the raw, client-editable payload for a signed token. The raw dicts never leave the server."""
+        now = self._clock()
+        if card.status == "pending" and card.args is not None:
+            card.token = self._signer.seal_confirm(user_id, card.tool, card.args, now)
+        elif card.status == "applied" and card.undo is not None:
+            card.undo_token = self._signer.seal_undo(user_id, card.undo, now)
+        card.args = card.undo = None
+        return card
+
+    def _open(self, token: str, kind: str, user_id: UUID):
+        try:
+            return self._signer.open(token, kind=kind, user_id=user_id, now=self._clock())
+        except CardTokenError as exc:
+            if exc.code == "replayed":
+                raise ConflictError("That was already done.") from exc
+            if exc.code == "expired":
+                raise ValidationError("That card expired. Ask again.") from exc
+            raise ValidationError("That card isn't valid any more.") from exc   # same words for forged, foreign, wrong type
 
     async def _plan(self, text: str, ctx: AgentContext, before_model) -> tuple[list[PlannedAction], bool] | None:
         context = {
@@ -458,12 +526,23 @@ class AgentChatService:
             return None
         return validate_plan(raw, ctx)
 
-    # confirm / undo (called by /chat/actions/*)
-    async def confirm(self, user_id: UUID, tool: str, args: dict) -> ActionCard:
-        planned = normalize(tool, args, await self._exec.context(user_id))
-        if planned is None:
-            raise ValidationError("That action isn't valid any more.")
-        return await self._exec.apply(user_id, planned, confirmed=True)
+    async def confirm(self, user_id: UUID, token: str) -> ActionCard:
+        claims = self._open(token, "confirm", user_id)
+        try:
+            planned = normalize(claims.tool or "", claims.payload, await self._exec.context(user_id))
+            if planned is None:
+                raise ValidationError("That action isn't valid any more.")
+            return self._seal(user_id, await self._exec.apply(user_id, planned, confirmed=True))
+        except Exception:
+            self._signer.release(claims)      # a transient failure shouldn't burn the card
+            raise
 
-    async def undo(self, user_id: UUID, payload: dict) -> str:
-        return await self._exec.undo(user_id, payload)
+    async def undo(self, user_id: UUID, token: str) -> str:
+        claims = self._open(token, "undo", user_id)
+        try:
+            return await self._exec.undo(user_id, claims.payload)
+        except (ValueError, KeyError, TypeError) as exc:     # stale or unrestorable value: a clean 422, never a bare 500
+            raise ValidationError("That undo isn't valid any more.") from exc
+        except Exception:
+            self._signer.release(claims)
+            raise

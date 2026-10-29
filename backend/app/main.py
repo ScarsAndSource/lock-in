@@ -18,7 +18,7 @@ from app.exceptions import (
 )
 from app.routers import calendar as calendar_router
 from app.routers import (
-    actions, chat, chat_actions, companion, experiments, inference, ingest, chat_threads, checkins, goals, habits, insights, intentions, missions, mood, notifications,
+    actions, chat_actions, companion, experiments, inference, ingest, chat_threads, checkins, goals, habits, insights, intentions, missions, mood, notifications,
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
     study, support, tasks, urges, growth, crew, journey,
 )
@@ -179,7 +179,7 @@ async def ready():
 
 for module in (
     habits, checkins, sleep, screen_time, stats, missions, profile, retros, insights,
-    study, urges, goals, intentions, chat, chat_threads, support, pauses, pause_shortcuts,
+    study, urges, goals, intentions, chat_threads, support, pauses, pause_shortcuts,
     tasks, notifications, mood, actions, chat_actions, ingest, companion, experiments, inference, calendar_router,
     growth, crew, journey,
 ):

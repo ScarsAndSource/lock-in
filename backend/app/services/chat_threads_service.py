@@ -197,6 +197,7 @@ class ChatThreadsService:
                 "model": reply.model,
                 # structure only, never free text (summaries live in the encrypted content)
                 **({"actions": [{"tool": c.tool, "status": c.status} for c in reply.actions]} if reply.actions else {}),
+                **({"flags": list(reply.flags)} if reply.flags else {}),
             },
             created_at=now + timedelta(milliseconds=1),
         ))

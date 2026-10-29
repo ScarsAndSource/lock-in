@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, get_db
+from app.guard.signing import CardSigner, InMemoryNonceStore, derive_secret as derive_card_secret
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.experiment_repository import SqlAlchemyExperimentRepository
 from app.services.experiments_service import ExperimentsService
@@ -397,13 +398,19 @@ def get_agent_executor(
     )
 
 
+_card_nonces = InMemoryNonceStore()   # one per process, so a token is single-use across requests
+
+def get_card_signer(settings: Settings = Depends(get_settings)) -> CardSigner:
+    return CardSigner(derive_card_secret(settings.field_encryption_key), _card_nonces)
+
 def get_agent_chat_service(
     chat: ChatService = Depends(get_chat_service),
     llm: LLMClient = Depends(get_llm_client),
     executor: AgentExecutor = Depends(get_agent_executor),
+    signer: CardSigner = Depends(get_card_signer),
     clock: Clock = Depends(get_clock),
 ) -> AgentChatService:
-    return AgentChatService(chat, scoped(llm, "chat"), executor, clock)
+    return AgentChatService(chat, scoped(llm, "chat"), executor, signer, clock)
 
 
 def get_chat_threads_service(

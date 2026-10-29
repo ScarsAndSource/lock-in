@@ -8,9 +8,10 @@ from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from app.config import Settings, get_settings
 from app.deps import get_chat_threads_service
+from app.exceptions import RateLimitedError
 from app.limits.idempotency import Idempotency
 from app.limits.turn import turn_scope
-from app.ratelimit import rate_limit
+from app.ratelimit import get_limiter, rate_limit
 from app.schemas_chat import ActionCardOut, SupportOut
 from app.schemas_threads import (
     DeletedOut, MessageOut, RenameThreadRequest, SendMessageOut, SendMessageRequest,
@@ -20,6 +21,20 @@ from app.security import get_current_user_id
 from app.services.chat_threads_service import ChatThreadsService, MessageView, ThreadView
 
 router = APIRouter(prefix="/chat", tags=["chat-threads"], dependencies=[Depends(rate_limit("api"))])
+
+
+def _enforce_chat_limits(user_id: UUID, settings: Settings) -> None:
+    """Called only when a model is about to be called, never on the crisis/support path. (Moved here from the removed
+    stateless POST /chat router: this is now the only chat entry point.)"""
+    if not settings.rate_limit_enabled:
+        return
+    for bucket, limit, window in (
+        ("chat_min", settings.rate_limit_chat_per_minute, 60),
+        ("chat_hour", settings.rate_limit_chat_per_hour, 3600),
+    ):
+        retry_after = get_limiter().check(f"{bucket}:{user_id}", limit, window)
+        if retry_after is not None:
+            raise RateLimitedError(retry_after)
 
 
 def _thread_out(v: ThreadView) -> ThreadOut:
@@ -45,7 +60,8 @@ def _message_out(v: MessageView) -> MessageOut:
         narrated=v.narrated,
         model=v.model,
         actions=[ActionCardOut(
-            id=c.id, tool=c.tool, status=c.status, summary=c.summary, reason=c.reason, args=c.args, undo=c.undo,
+            id=c.id, tool=c.tool, status=c.status, summary=c.summary, reason=c.reason, token=c.token,
+            undo_token=c.undo_token,
         ) for c in v.actions],
         created_at=m.created_at,
     )
