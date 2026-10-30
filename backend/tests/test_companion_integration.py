@@ -275,7 +275,7 @@ def test_one_sentence_becomes_three_actions_and_each_is_undoable(world, user_a):
     assert [t.title for t in world.task_repo.rows.values()] == ["Call mom"]
 
     for card in reply["actions"]:
-        assert c.post("/chat/actions/undo", json={"undo": card["undo"]}).status_code == 200
+        assert c.post("/chat/actions/undo", json={"token": card["undo_token"]}).status_code == 200
     assert world.habit_repo._logs == {} and run(world.sleep_repo.get_log(user_a, date(2026, 10, 14))) is None
     assert world.task_repo.rows == {}
 
@@ -288,7 +288,7 @@ def test_undo_restores_a_previous_value_not_just_deletes(world, user_a):
     world.llm.replies = [_plan({"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "skipped"}, "confidence": "high"})]
     card = _say(c, "I skipped gym actually")["reply"]["actions"][0]
     assert next(iter(world.habit_repo._logs.values())).status.value == "skipped"
-    c.post("/chat/actions/undo", json={"undo": card["undo"]})
+    assert c.post("/chat/actions/undo", json={"token": card["undo_token"]}).status_code == 200
     assert next(iter(world.habit_repo._logs.values())).status.value == "done"
 
 
@@ -318,13 +318,17 @@ def test_ambiguous_writes_wait_for_a_tap_and_confirm_revalidates(world, user_a):
     cards = _say(c, "log that gym thing and if it is 11pm then phone out of room")["reply"]["actions"]
     assert [x["status"] for x in cards] == ["pending", "pending"] and world.habit_repo._logs == {}
     assert run(world.intention_repo.list(user_a)) == []
-    done = c.post("/chat/actions/confirm", json={"tool": cards[0]["tool"], "args": cards[0]["args"]})
-    assert done.json()["status"] == "applied" and len(world.habit_repo._logs) == 1
-    tampered = dict(cards[0]["args"], habit_id=str(uuid4()))
-    assert c.post("/chat/actions/confirm", json={"tool": "log_habit", "args": tampered}).status_code == 422
-    plan = c.post("/chat/actions/confirm", json={"tool": cards[1]["tool"], "args": cards[1]["args"]}).json()
+    assert all(x["token"] for x in cards)                               # a pending card carries a signed, single-use token
+    done = c.post("/chat/actions/confirm", json={"token": cards[0]["token"]})
+    assert done.status_code == 200 and done.json()["status"] == "applied" and len(world.habit_repo._logs) == 1
+    assert c.post("/chat/actions/confirm", json={"token": cards[0]["token"]}).status_code == 409   # single use: a double tap can't apply twice
+    assert len(world.habit_repo._logs) == 1
+    tok = cards[1]["token"]
+    tampered = tok[:-1] + ("A" if tok[-1] != "A" else "B")             # any edit to a token breaks its signature
+    assert c.post("/chat/actions/confirm", json={"token": tampered}).status_code == 422
+    plan = c.post("/chat/actions/confirm", json={"token": tok}).json()  # the untouched token still works (the bad one burned nothing)
     assert plan["status"] == "applied" and len(run(world.intention_repo.list(user_a))) == 1
-    assert c.post("/chat/actions/undo", json={"undo": plan["undo"]}).status_code == 200
+    assert c.post("/chat/actions/undo", json={"token": plan["undo_token"]}).status_code == 200
     assert run(world.intention_repo.list(user_a)) == []
 
 
@@ -362,8 +366,8 @@ def test_move_a_reminder_and_snooze_a_task_by_chat(world, user_a):
     assert [x["status"] for x in cards] == ["applied", "applied"]
     row = world.task_repo.rows[t.task.id]
     assert row.remind_at == at_ist(20, 30) and row.snoozed_until == world.now + timedelta(minutes=90)
-    c.post("/chat/actions/undo", json={"undo": cards[1]["undo"]})
-    c.post("/chat/actions/undo", json={"undo": cards[0]["undo"]})
+    assert c.post("/chat/actions/undo", json={"token": cards[1]["undo_token"]}).status_code == 200
+    assert c.post("/chat/actions/undo", json={"token": cards[0]["undo_token"]}).status_code == 200
     row = world.task_repo.rows[t.task.id]
     assert row.remind_at == at_ist(18, 0) and row.snoozed_until is None
 
@@ -383,6 +387,30 @@ def test_action_and_question_in_one_message(world, user_a):
     ]
     reply = _say(c, "I did gym, how am I doing overall?")["reply"]
     assert reply["actions"][0]["status"] == "applied" and "Gym" in reply["content"]
+
+
+def test_daily_cap_hit_between_planner_and_answer_keeps_the_applied_actions(world, user_a):
+    """The planner takes the LAST call of the day, the answer call then goes over the cap. The request must still
+    succeed with the action cards (a 429 here rolls the whole transaction back and the logged action vanishes)."""
+    from app.deps import get_llm_client
+    from app.domain import HabitLog, HabitStatus
+    from app.services.llm import BudgetedLLM
+    from tests.fakes_slice7 import InMemoryLlmUsageRepository
+    c = world.client_as(user_a)
+    gym = make_habit(world, user_a, "Gym")
+    world.now = at_ist(9)
+    for i in range(1, 4):                                               # logged history, so chat would have facts to answer from
+        run(world.habit_repo.upsert_log(HabitLog(habit_id=gym.id, user_id=user_a, log_date=date(2026, 10, 14) - timedelta(days=i),
+                                                 status=HabitStatus.DONE)))
+    usage = InMemoryLlmUsageRepository()
+    app.dependency_overrides[get_llm_client] = lambda: BudgetedLLM(world.llm, usage, user_a, 1, "chat", world._clock)
+    world.llm.replies = [_plan({"tool": "log_habit", "args": {"habit_id": str(gym.id), "status": "done"}, "confidence": "high"},
+                               wants_answer=True)]
+    reply = _say(c, "I did gym, how am I doing overall?")["reply"]
+    assert reply["mode"] == "action" and [a["status"] for a in reply["actions"]] == ["applied"]
+    assert "Gym" in reply["content"] and "AI allowance" in reply["content"]
+    assert len(world.llm.calls) == 1                                    # only the planner ran; the answer was refused by the cap
+    assert [l.status.value for l in world.habit_repo._logs.values() if l.log_date == date(2026, 10, 14)] == ["done"]
 
 
 def test_gate_is_permissive_for_commands_and_quiet_for_questions():

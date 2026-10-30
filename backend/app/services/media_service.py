@@ -20,7 +20,7 @@ from app.safety import is_crisis, support_payload
 from app.services.audio_sniff import inspect_audio
 from app.services.checkin_parser import MAX_SPEECH_CHARS, ParsedCheckin, build_messages, parse_reply
 from app.services.habits_service import HabitsService
-from app.services.llm import LLMBudgetExceeded, LLMError, MediaLLM, seconds_until_reset
+from app.services.llm import LLMBudgetExceeded, LLMError, LLMRejectedInput, MediaLLM, seconds_until_reset
 from app.services.profile_service import ProfileService
 from app.services import schedule_image_parser as schedule_parser
 from app.services.screenshot_parser import MAX_IMAGE_BYTES, PROMPT, ParsedScreenshot, parse_reply as parse_screen, sniff_image
@@ -53,6 +53,9 @@ class MediaService:
             return await call()
         except LLMBudgetExceeded as exc:
             raise DailyLimitError(seconds_until_reset(self._clock())) from exc
+        except LLMRejectedInput as exc:
+            logger.info("media input rejected by the provider")
+            raise ValidationError("That file couldn't be processed. Try a smaller or clearer one.") from exc
         except LLMError as exc:
             logger.warning("media model call failed: %s", type(exc).__name__)
             raise ServiceUnavailableError("The assistant is unavailable right now. Try again, or log it by hand.") from exc

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.dates import Clock, utc_now
 from app.db import AsyncSessionLocal, get_db
+from app.guard.nonce_redis import RedisNonceStore
 from app.guard.signing import CardSigner, InMemoryNonceStore, derive_secret as derive_card_secret
 from app.repositories.account_repository import SqlAlchemyAccountRepository
 from app.repositories.experiment_repository import SqlAlchemyExperimentRepository
@@ -347,10 +348,6 @@ def get_chat_service(
 
 
 # ---- tasks, reminders, nudges, push (slice 11)
-def get_task_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyTaskRepository:
-    return SqlAlchemyTaskRepository(session)
-
-
 def get_notification_repository(session: AsyncSession = Depends(get_db)) -> SqlAlchemyNotificationRepository:
     return SqlAlchemyNotificationRepository(session)
 
@@ -398,7 +395,7 @@ def get_agent_executor(
     )
 
 
-_card_nonces = InMemoryNonceStore()   # one per process, so a token is single-use across requests
+_card_nonces = RedisNonceStore(InMemoryNonceStore())   # shared through Redis (in-process when Redis is off), so a token is single-use across requests AND instances
 
 def get_card_signer(settings: Settings = Depends(get_settings)) -> CardSigner:
     return CardSigner(derive_card_secret(settings.field_encryption_key), _card_nonces)

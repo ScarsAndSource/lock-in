@@ -64,6 +64,7 @@ BLOCKED_REPLY = (
     "Ask about a habit, a day or a pattern, or tell me what to log."
 )
 BULK_REASON = "That changes several tasks at once. Check each one."
+DAILY_LIMIT_NOTE = "You've used today's AI allowance, so no analysis this time. It resets at 00:00 UTC."
 _TICK, _CROSS = "\u2713 ", "\u2717 "     # escapes on purpose: these glyphs were double-encoded on disk once
 
 PLANNER_PROMPT = """\
@@ -458,8 +459,16 @@ class AgentChatService:
         ]
         reply = ChatReply(mode="action", reply="\n".join(lines), actions=cards, flags=flags)
         if wants_answer:
-            answer = await self._chat.reply(user_id, message, history, before_model=before_model)
-            if answer.mode in ("answer", "fallback"):
+            try:
+                answer = await self._chat.reply(user_id, message, history, before_model=before_model)
+            except DailyLimitError:
+                # The planner call above may have used the LAST call of the day, and the actions are already applied.
+                # Letting this propagate would answer 429 and roll the whole request back, erasing them. Keep them,
+                # skip the answer, say why.
+                answer = None
+                reply.reply += "\n\n" + DAILY_LIMIT_NOTE
+                reply.flags.append("daily_limit")
+            if answer is not None and answer.mode in ("answer", "fallback"):
                 reply.reply += "\n\n" + answer.reply
                 reply.next_step, reply.cited_days = answer.next_step, answer.cited_days
                 reply.narrated, reply.model = answer.narrated, answer.model
@@ -498,9 +507,9 @@ class AgentChatService:
         card.args = card.undo = None
         return card
 
-    def _open(self, token: str, kind: str, user_id: UUID):
+    async def _open(self, token: str, kind: str, user_id: UUID):
         try:
-            return self._signer.open(token, kind=kind, user_id=user_id, now=self._clock())
+            return await self._signer.open(token, kind=kind, user_id=user_id, now=self._clock())
         except CardTokenError as exc:
             if exc.code == "replayed":
                 raise ConflictError("That was already done.") from exc
@@ -529,22 +538,22 @@ class AgentChatService:
         return validate_plan(raw, ctx)
 
     async def confirm(self, user_id: UUID, token: str) -> ActionCard:
-        claims = self._open(token, "confirm", user_id)
+        claims = await self._open(token, "confirm", user_id)
         try:
             planned = normalize(claims.tool or "", claims.payload, await self._exec.context(user_id))
             if planned is None:
                 raise ValidationError("That action isn't valid any more.")
             return self._seal(user_id, await self._exec.apply(user_id, planned, confirmed=True))
         except Exception:
-            self._signer.release(claims)      # a transient failure shouldn't burn the card
+            await self._signer.release(claims)      # a transient failure shouldn't burn the card
             raise
 
     async def undo(self, user_id: UUID, token: str) -> str:
-        claims = self._open(token, "undo", user_id)
+        claims = await self._open(token, "undo", user_id)
         try:
             return await self._exec.undo(user_id, claims.payload)
         except (ValueError, KeyError, TypeError) as exc:     # stale or unrestorable value: a clean 422, never a bare 500
             raise ValidationError("That undo isn't valid any more.") from exc
         except Exception:
-            self._signer.release(claims)
+            await self._signer.release(claims)
             raise

@@ -297,7 +297,7 @@ def _seed_chat(world, c, last_two):
 
 def _chat_system_prompt(world, c):
     world.llm.replies = [json.dumps({"answer": "x", "next_step": "y", "cited_days": ["2026-12-30"]})]
-    assert c.post("/chat", json={"message": "how is it going?"}).status_code == 200
+    assert c.post("/chat/messages", json={"message": "how is it going?"}).status_code == 200
     return world.llm.calls[0][0][0]["content"]
 
 
