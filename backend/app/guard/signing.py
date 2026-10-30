@@ -1,8 +1,9 @@
 """
 Signed action cards: pending cards and undo chips carry an HMAC-signed token instead of client-editable JSON.
 Signed (domain-separated key), bound to the user id, typed (confirm vs undo), short-lived, and single-use (nonce).
-Single-use is enforced by a NonceStore: the default is in-process; the Redis layer swaps in a shared one with the same
-two methods. PURE apart from the NonceStore: secret, clock and ids arrive as arguments.
+Single-use is enforced by a NonceStore (async): the default is in-process; app/guard/nonce_redis.py provides the shared
+one (Redis, falling back to in-process when Redis is unavailable). PURE apart from the NonceStore: secret, clock and ids
+arrive as arguments.
 """
 from __future__ import annotations
 
@@ -31,8 +32,8 @@ class CardTokenError(Exception):
 
 
 class NonceStore(Protocol):
-    def consume(self, nonce: str, expires_at: datetime, now: datetime) -> bool: ...   # True only the first time
-    def release(self, nonce: str) -> None: ...
+    async def consume(self, nonce: str, expires_at: datetime, now: datetime) -> bool: ...   # True only the first time
+    async def release(self, nonce: str) -> None: ...
 
 
 class InMemoryNonceStore:
@@ -43,7 +44,7 @@ class InMemoryNonceStore:
         self._max = max_entries
         self._lock = threading.Lock()
 
-    def consume(self, nonce: str, expires_at: datetime, now: datetime) -> bool:
+    async def consume(self, nonce: str, expires_at: datetime, now: datetime) -> bool:
         with self._lock:
             if len(self._seen) >= self._max // 2:
                 self._seen = {n: e for n, e in self._seen.items() if e > now}
@@ -54,7 +55,7 @@ class InMemoryNonceStore:
             self._seen[nonce] = expires_at
             return True
 
-    def release(self, nonce: str) -> None:
+    async def release(self, nonce: str) -> None:
         with self._lock:
             self._seen.pop(nonce, None)
 
@@ -137,16 +138,16 @@ class CardSigner:
             raise CardTokenError("expired")
         return claims
 
-    def open(self, token: str, *, kind: str, user_id: UUID, now: datetime) -> CardClaims:
+    async def open(self, token: str, *, kind: str, user_id: UUID, now: datetime) -> CardClaims:
         """Verify, check type and owner, then consume the nonce. If applying fails transiently, call release(claims)."""
         claims = self.verify(token, now)
         if claims.kind != kind:
             raise CardTokenError("wrong_type")
         if claims.user_id != user_id:
             raise CardTokenError("wrong_user")
-        if not self._nonces.consume(claims.nonce, claims.expires_at, now):
+        if not await self._nonces.consume(claims.nonce, claims.expires_at, now):
             raise CardTokenError("replayed")
         return claims
 
-    def release(self, claims: CardClaims) -> None:
-        self._nonces.release(claims.nonce)
+    async def release(self, claims: CardClaims) -> None:
+        await self._nonces.release(claims.nonce)

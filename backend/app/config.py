@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     groq_transcribe_model: str = "whisper-large-v3-turbo"  # voice check-in; check Groq's current model list
     groq_vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"  # screenshot screen time; same advice
     max_audio_bytes: int = Field(default=4_000_000, ge=10_000)
-    max_image_bytes: int = Field(default=4_000_000, ge=10_000)
+    max_image_bytes: int = Field(default=2_800_000, ge=10_000)  # NOT read anywhere yet: the enforced cap is screenshot_parser.MAX_IMAGE_BYTES
     rate_limit_media_per_minute: int = Field(default=6, ge=1)   # voice + screenshot uploads, per user
     rate_limit_media_per_hour: int = Field(default=40, ge=1)
     llm_daily_call_cap: int = Field(default=80, ge=1)  # per user per UTC day, all features, retries included

@@ -16,7 +16,9 @@ from app.services.parse_utils import as_int, load_json_object
 MAX_CATEGORIES = 8
 MAX_NAME_CHARS = 40
 MAX_DAY_MINUTES = 1440
-MAX_IMAGE_BYTES = 4_000_000
+# Raw bytes. The model call sends the image base64-encoded (x 4/3), and the provider limits the ENCODED size to 4 MB,
+# so 2.8 MB raw (= about 3.73 MB encoded) is the largest upload that can't come back as a 413.
+MAX_IMAGE_BYTES = 2_800_000
 _CONFIDENCE = {"high", "medium", "low"}
 
 PROMPT = """\

@@ -50,6 +50,11 @@ class LLMBudgetExceeded(LLMError):
     """The user's daily AI allowance (calls, weighted units or tokens) is used up."""
 
 
+class LLMRejectedInput(LLMError):
+    """The provider refused THIS input (HTTP 413 too large, 422 unprocessable). The provider is fine: it is not an
+    outage, so it never counts toward the circuit breaker, and media callers turn it into a 422 for the person."""
+
+
 class LLMClient(Protocol):
     model: str
 
@@ -168,6 +173,10 @@ class GroqClient:
                     raise LLMUnavailableError(f"Groq rejected our credentials (HTTP {resp.status_code}).")
                 if resp.status_code == 400:
                     raise LLMError("Groq rejected the request (HTTP 400).")  # e.g. JSON mode failed, bad audio/image
+                if resp.status_code in (413, 422):
+                    # One person's oversized or unreadable input. Must NOT be LLMUnavailableError: five of these in a
+                    # row from a single user would open the breaker and switch AI off for everyone.
+                    raise LLMRejectedInput(f"Groq rejected this input (HTTP {resp.status_code}).")
                 if resp.status_code not in _RETRYABLE_STATUS:
                     raise LLMUnavailableError(f"Groq rejected the request (HTTP {resp.status_code}).")
                 reason = f"HTTP {resp.status_code}"
