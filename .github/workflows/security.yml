@@ -1,0 +1,27 @@
+# Checks the backend's pinned dependencies against known vulnerabilities (pip-audit). A failed run emails you.
+# Runs when requirements change, on pull requests that touch them, and weekly (new advisories appear without a commit).
+name: security
+on:
+  push:
+    branches: [main]
+    paths: ["backend/requirements*.txt"]
+  pull_request:
+    paths: ["backend/requirements*.txt"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Audit pinned dependencies
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit --requirement backend/requirements.txt --progress-spinner off

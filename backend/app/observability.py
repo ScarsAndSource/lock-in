@@ -68,6 +68,19 @@ def init_sentry(settings: Settings) -> bool:
     return True
 
 
+def report(message: str, level: str = "error") -> None:
+    """A message-only event (no exception) for things an operator should see: the AI ceiling tripping, an abuse review.
+    No-op unless Sentry is on. Pass counts and codes, never user text. Never raises."""
+    if not _enabled:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.capture_message(message, level=level)
+    except Exception:  # noqa: BLE001
+        logger.exception("Sentry report failed")
+
+
 def tag_request(request_id: str) -> None:
     if not _enabled:
         return

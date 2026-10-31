@@ -51,6 +51,55 @@ class Settings(BaseSettings):
     ai_breaker_window_seconds: int = Field(default=30, ge=1)
     ai_breaker_cooldown_seconds: int = Field(default=20, ge=1)
 
+    # --- database pool (batch 4) -------------------------------------------------
+    # A request holds its DB connection while the model answers, so the pool is the real concurrency ceiling. Waiting
+    # for a free connection longer than db_pool_timeout_seconds fails fast with a 503 instead of queueing forever.
+    db_pool_size: int = Field(default=10, ge=1, le=100)
+    db_max_overflow: int = Field(default=20, ge=0, le=200)
+    db_pool_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
+    # Model calls in flight per instance. Beyond it a call waits up to ai_slot_wait_seconds, then takes the same
+    # deterministic fallback as an outage (nothing is charged). 0 = no limit.
+    ai_max_concurrent: int = Field(default=6, ge=0, le=100)
+    ai_slot_wait_seconds: float = Field(default=3.0, ge=0, le=30)
+
+    # --- client IP behind a proxy (batch 4) ----------------------------------------
+    # How many proxies in front of the app APPEND to X-Forwarded-For (Render's load balancer = 1; Cloudflare in front
+    # of Render = 2). The Nth entry from the RIGHT is the client: everything to its left is client-controlled.
+    # 0 = ignore the header and use the socket peer.
+    trusted_proxy_hops: int = Field(default=1, ge=0, le=5)
+
+    # --- global AI ceiling (batch 4) -----------------------------------------------
+    # Provider calls / tokens across ALL users per UTC day. When either reaches ai_global_trip_fraction of its cap the
+    # global AI-off flag is set until 00:00 UTC (Sentry alert + audit event). 0 = that ceiling is off.
+    ai_global_daily_calls: int = Field(default=0, ge=0)
+    ai_global_daily_tokens: int = Field(default=0, ge=0)
+    ai_global_trip_fraction: float = Field(default=0.9, gt=0, le=1)
+
+    # --- abuse strikes (batch 4) ---------------------------------------------------
+    # Each detection adds weighted strikes that expire after strike_window_seconds. At the soft threshold the person's
+    # AI rate limits halve for strike_halve_seconds; at the hard threshold AI is switched off for them (first time
+    # strike_ban_first_seconds, after that strike_ban_repeat_seconds) and from strike_review_offenses offenses it is
+    # also flagged for review. AI only: the tracker, undo and the crisis path are never affected.
+    strike_window_seconds: int = Field(default=86_400, ge=60)
+    strike_soft_threshold: int = Field(default=4, ge=1)
+    strike_hard_threshold: int = Field(default=8, ge=2)
+    strike_halve_seconds: int = Field(default=3_600, ge=60)
+    strike_ban_first_seconds: int = Field(default=3_600, ge=60)
+    strike_ban_repeat_seconds: int = Field(default=86_400, ge=60)
+    strike_offense_memory_seconds: int = Field(default=604_800, ge=3600)
+    strike_review_offenses: int = Field(default=3, ge=1)
+    strike_storm_threshold: int = Field(default=10, ge=0)    # this many 429s inside the window = one strike; 0 = off
+    strike_storm_window_seconds: int = Field(default=60, ge=1)
+
+    # --- security audit trail (batch 4) ----------------------------------------------
+    ai_event_retention_days: int = Field(default=30, ge=1)    # python -m app.jobs.prune_ai_security_events
+
+    # --- production boot guard (batch 4) -------------------------------------------
+    # With APP_ENV=production the app refuses to start on an unsafe setup. Set this only to run a single instance
+    # without Redis on purpose (limits then live in one process and reset on every restart).
+    allow_no_redis: bool = False
+
     # --- caching, weighted AI budget, audio limits ----------------------------
     facts_cache_ttl_seconds: int = Field(default=60, ge=0, le=900)      # 0 = off. Data-version invalidation does the real work; this is the safety net
     answer_cache_ttl_seconds: int = Field(default=600, ge=0, le=3600)   # 0 = off
@@ -108,6 +157,27 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_MODE=hs256 requires SUPABASE_JWT_SECRET.")
         if self.auth_mode == "jwks" and not self.supabase_jwks_url:
             raise ValueError("AUTH_MODE=jwks requires SUPABASE_JWKS_URL.")
+        return self
+
+    @model_validator(mode="after")
+    def _check_strikes(self) -> "Settings":
+        if self.strike_hard_threshold <= self.strike_soft_threshold:
+            raise ValueError("STRIKE_HARD_THRESHOLD must be higher than STRIKE_SOFT_THRESHOLD.")
+        return self
+
+    @model_validator(mode="after")
+    def _check_production(self) -> "Settings":
+        if self.app_env.strip().lower() not in {"production", "prod"}:
+            return self
+        problems: list[str] = []
+        if not self.rate_limit_enabled:
+            problems.append("RATE_LIMIT_ENABLED must be true")
+        if any("localhost" in o or "127.0.0.1" in o for o in self.cors_allow_origins):
+            problems.append("CORS_ALLOW_ORIGINS must not contain localhost or 127.0.0.1")
+        if not self.redis_url and not self.allow_no_redis:
+            problems.append("REDIS_URL is required (or ALLOW_NO_REDIS=true to run one instance without shared limits)")
+        if problems:
+            raise ValueError("Unsafe production configuration: " + "; ".join(problems) + ".")
         return self
 
     @property

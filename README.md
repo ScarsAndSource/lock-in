@@ -505,6 +505,7 @@ The HTTP app never runs these; each is a plain command run on a schedule with **
 | Job | Schedule (cron) | Command | What it does |
 |---|---|---|---|
 | Task nudges and companion dispatch | `*/5 * * * *` | `python -m app.jobs.send_nudges` | Task reminders plus the companion moments, under one daily budget, for every user with a device |
+| Prune AI security events | Daily | `python -m app.jobs.prune_ai_security_events` |
 | Companion moments | `2-59/5 * * * *` | `python -m app.jobs.companion_tick` | Morning/evening moments, same-day insight pulse, crew moments; trims old usage events nightly |
 | Notes to future self | `4-59/5 * * * *` | `python -m app.jobs.future_self_tick` | Delivers a note at the person's usual slip time |
 | Weekly retros | daily | `python -m app.jobs.generate_retros` | Generates each user's weekly retro. Idempotent (daily because people finish their Sunday at different times) |

@@ -29,6 +29,9 @@ _settings = get_settings()
 engine = create_async_engine(
     _settings.database_url,
     pool_pre_ping=True,
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
+    pool_timeout=_settings.db_pool_timeout_seconds,   # a full pool answers 503 after this long, it never queues forever
     connect_args={"statement_cache_size": 0},  # required behind Supabase's pooler
 )
 
