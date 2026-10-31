@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import type { ActionCard } from '../types';
 import { confirmAction, undoAction } from '../api/chat';
+import type { SignedCard } from '../api/chat';
 import { useApp } from '../context/AppContext';
 import { errorMessage } from '../lib/format';
 
-type Local = { card: ActionCard; undone?: boolean; dismissed?: boolean; busy?: boolean };
+type Local = { card: SignedCard; undone?: boolean; dismissed?: boolean; busy?: boolean };
 
 /**
  * What the Companion did with a message. Applied writes show "Logged. Undo"; ambiguous ones wait for one tap.
  * Self-contained: it owns the per-card state, so the chat only renders <ActionCards cards={message.actions} />.
- * Cards exist for the live reply only (undo payloads and pending args are deliberately not stored).
+ * Cards exist for the live reply only. The server hands out signed, single-use tokens (never the raw args or undo
+ * payload): Save sends the card's `token`, Undo sends its `undo_token`, and nothing else goes back.
  */
 export const ActionCards: React.FC<{ cards?: ActionCard[] }> = ({ cards }) => {
   const { showToast } = useApp();
@@ -19,7 +21,7 @@ export const ActionCards: React.FC<{ cards?: ActionCard[] }> = ({ cards }) => {
   const patch = (id: string, change: Partial<Local>) =>
     setItems((prev) => prev.map((i) => (i.card.id === id ? { ...i, ...change } : i)));
 
-  const confirm = async (card: ActionCard) => {
+  const confirm = async (card: SignedCard) => {
     patch(card.id, { busy: true });
     try {
       patch(card.id, { card: await confirmAction(card), busy: false });
@@ -29,7 +31,7 @@ export const ActionCards: React.FC<{ cards?: ActionCard[] }> = ({ cards }) => {
     }
   };
 
-  const undo = async (card: ActionCard) => {
+  const undo = async (card: SignedCard) => {
     patch(card.id, { busy: true });
     try {
       await undoAction(card);
@@ -57,12 +59,12 @@ export const ActionCards: React.FC<{ cards?: ActionCard[] }> = ({ cards }) => {
               {failed && card.reason ? ` — ${card.reason}` : ''}
               {card.status === 'pending' && card.reason ? ` — ${card.reason}` : ''}
             </span>
-            {card.status === 'applied' && !undone && card.undo && (
+            {card.status === 'applied' && !undone && card.undo_token && (
               <button type="button" disabled={busy} onClick={() => undo(card)} className={`${btn} bg-surface text-ink`}>
                 Undo
               </button>
             )}
-            {card.status === 'pending' && (
+            {card.status === 'pending' && card.token && (
               <span className="flex gap-1.5 shrink-0">
                 <button type="button" disabled={busy} onClick={() => confirm(card)} className={`${btn} bg-ink text-ground-chalk`}>
                   Save

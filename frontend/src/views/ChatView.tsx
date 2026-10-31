@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { getChatThreads, getThreadDetail, sendMessage } from '../api/chat';
+import { getChatThreads, getThreadDetail, newIdempotencyKey, sendMessage } from '../api/chat';
 import { fetchSupport } from '../api/support';
 import { SupportCard } from '../components/SupportCard';
 import { ActionCards } from '../components/ActionCards';
@@ -11,6 +11,7 @@ import { TypedText } from '../components/maruti/TypedText';
 import { useMaruti } from '../components/maruti/MarutiContext';
 import { classify } from '../components/maruti/banter';
 import { FAILED, GREETINGS, SUPPORT, dayPart, pick } from '../components/maruti/lines';
+import { marutiLineFor } from '../components/maruti/serverLines';
 import { Thread, ChatMessage, SupportPayload } from '../types';
 import { errorMessage } from '../lib/format';
 
@@ -30,6 +31,11 @@ export const ChatView: React.FC = () => {
   const [typingId, setTypingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageCountRef = useRef(0);
+  // Synchronous guard: state updates are async, so two quick submits could both pass an `isSending` check.
+  const sendingRef = useRef(false);
+  // The Idempotency-Key of a send that has not succeeded yet. Sending the SAME text again in the same chat reuses it,
+  // so a retry after a flaky connection returns the stored reply instead of asking the model a second time.
+  const keyRef = useRef<{ sig: string; key: string } | null>(null);
   // A thread we just created from the first message already has its messages on screen: do not reload (and wipe) them.
   const justCreatedRef = useRef<string | null>(null);
   messageCountRef.current = messages.length;
@@ -86,9 +92,12 @@ export const ChatView: React.FC = () => {
 
   const send = async (raw: string) => {
     const text = raw.trim();
-    if (!text || isSending) return;
+    if (!text || sendingRef.current) return;
+    sendingRef.current = true;
     setInputText('');
     setIsSending(true);
+    const sig = `${activeThreadId ?? ''}\u0000${text}`;
+    if (keyRef.current?.sig !== sig) keyRef.current = { sig, key: newIdempotencyKey() };
 
     // Maruti reacts to how you wrote it before the answer arrives (laughs with you, goes serious, stands guard).
     // Reacting is only his body language: what counts as a support reply still comes from the server.
@@ -103,7 +112,8 @@ export const ChatView: React.FC = () => {
     }
 
     try {
-      const res = await sendMessage(text, activeThreadId || undefined);
+      const res = await sendMessage(text, activeThreadId || undefined, keyRef.current.key);
+      keyRef.current = null;
       setMessages((prev) => [...prev, res.user_message, res.reply]);
       // The reply says "one of the lines below", so the resources must actually be on screen.
       let nextSupport = res.support ?? null;
@@ -132,9 +142,17 @@ export const ChatView: React.FC = () => {
       }
     } catch (err: unknown) {
       brain.settle();
-      brain.say(pick(FAILED), { mood: 'idle', speak: false });
-      showToast(errorMessage(err, 'Error communicating with assistant'));
+      const line = marutiLineFor(err);
+      if (line) {
+        // Busy / slow down / out of AI for today: an expected answer, so Maruti says it and the draft comes back.
+        brain.say(line.text, { mood: 'idle', speak: false });
+        if (line.keepDraft) setInputText(text);
+      } else {
+        brain.say(pick(FAILED), { mood: 'idle', speak: false });
+        showToast(errorMessage(err, 'Error communicating with assistant'));
+      }
     } finally {
+      sendingRef.current = false;
       setIsSending(false);
     }
   };

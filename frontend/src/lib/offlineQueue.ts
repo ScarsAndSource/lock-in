@@ -25,6 +25,7 @@ export interface QueueItem {
   path: string;
   body: Record<string, unknown>;
   date?: string; // check-in date, used to keep one day's check-ins in order
+  notBefore?: number; // epoch ms: the server said wait (Retry-After) or is struggling (429 / 5xx): don't send before this
 }
 
 export interface DroppedItem {
@@ -75,6 +76,17 @@ export function ownerKey(): string {
 /** Worth retrying later: no network / timeout, an expired session that may recover, a cold or overloaded backend. */
 export function isTransient(status: number): boolean {
   return status === 0 || status === 401 || status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * How long to leave a queued write alone after a transient failure. The server's Retry-After wins (capped at 10 min);
+ * otherwise an overloaded server (408 / 429 / 502 / 503 / 504) gets 5 s, 10 s, 20 s ... up to 5 min. Offline (0) and an
+ * expired session (401) need no wait: they have their own triggers (the online event, the token refresh).
+ */
+export function backoffMs(err: ApiError, attempts: number): number {
+  if (err.retryAfter !== undefined) return Math.min(err.retryAfter * 1000, 10 * 60_000);
+  if (err.status === 0 || err.status === 401) return 0;
+  return Math.min(5_000 * 2 ** Math.min(attempts, 6), 5 * 60_000);
 }
 
 // ------------------------------------------------------------------ change notifications (this tab + other tabs)
@@ -182,6 +194,7 @@ async function doReplay(): Promise<ReplayResult> {
   const items = await mine();
   for (const item of items) {
     if (navigator.onLine === false) break;
+    if (item.notBefore !== undefined && item.notBefore > Date.now()) break; // still backing off; later items wait behind it
     if (Date.now() - item.createdAt > MAX_AGE_MS) {
       await idbDelete('queue', item.id);
       result.dropped.push({ kind: item.kind, status: 0, message: 'older than 14 days' });
@@ -200,7 +213,8 @@ async function doReplay(): Promise<ReplayResult> {
         continue;
       }
       if (isTransient(err.status)) {
-        await idbPut('queue', { ...item, attempts: item.attempts + 1 });
+        const wait = backoffMs(err, item.attempts);
+        await idbPut('queue', { ...item, attempts: item.attempts + 1, notBefore: wait > 0 ? Date.now() + wait : undefined });
         break; // later items would fail the same way, and order matters for check-ins
       }
       await idbDelete('queue', item.id); // the server will never accept this one; retrying forever helps nobody

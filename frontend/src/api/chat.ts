@@ -8,7 +8,7 @@ const localMessages: Record<string, ChatMessage[]> = {
 };
 
 /** One key per send. The server uses it so a retry of THIS send returns the same reply instead of asking the model again. */
-function newIdempotencyKey(): string {
+export function newIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
@@ -36,7 +36,8 @@ export async function getThreadDetail(threadId: string): Promise<ThreadDetail> {
 
 export async function sendMessage(
   message: string,
-  threadId?: string
+  threadId?: string,
+  idempotencyKey?: string
 ): Promise<{
   thread: Thread;
   user_message: ChatMessage;
@@ -92,7 +93,7 @@ export async function sendMessage(
 
   return request('/chat/messages', {
     method: 'POST',
-    headers: { 'Idempotency-Key': newIdempotencyKey() },
+    headers: { 'Idempotency-Key': idempotencyKey ?? newIdempotencyKey() },
     body: JSON.stringify({ message, thread_id: threadId || null }),
   });
 }
@@ -100,21 +101,29 @@ export async function sendMessage(
 // ---------------------------------------------------------------- agent actions (log / capture / move by chat)
 import type { ActionCard } from '../types';
 
-/** Apply a PENDING card. The server re-validates the args exactly like model output. */
-export async function confirmAction(card: ActionCard): Promise<ActionCard> {
-  if (isDemoMode()) return { ...card, status: 'applied', args: null };
-  return request<ActionCard>('/chat/actions/confirm', {
+/**
+ * What the server sends for an action card: a pending card carries a signed, single-use `token` (to confirm), an
+ * applied one carries a signed `undo_token`. The raw args / undo payload never reach the client any more.
+ */
+export type SignedCard = ActionCard & { token?: string | null; undo_token?: string | null };
+
+/** Apply a PENDING card. Only the signed token goes back; the server re-validates it exactly like model output. */
+export async function confirmAction(card: SignedCard): Promise<SignedCard> {
+  if (isDemoMode()) return { ...card, status: 'applied', token: null, undo_token: 'demo' };
+  if (!card.token) throw new Error('That card can no longer be confirmed. Ask again.');
+  return request<SignedCard>('/chat/actions/confirm', {
     method: 'POST',
-    body: JSON.stringify({ tool: card.tool, args: card.args ?? {} }),
+    body: JSON.stringify({ token: card.token }),
   });
 }
 
 /** The "Logged. Undo" chip: restores exactly what the action replaced, or removes what it created. */
-export async function undoAction(card: ActionCard): Promise<string> {
+export async function undoAction(card: SignedCard): Promise<string> {
   if (isDemoMode()) return 'Undone.';
+  if (!card.undo_token) throw new Error('That can no longer be undone.');
   const res = await request<{ message: string }>('/chat/actions/undo', {
     method: 'POST',
-    body: JSON.stringify({ undo: card.undo ?? {} }),
+    body: JSON.stringify({ token: card.undo_token }),
   });
   return res.message;
 }

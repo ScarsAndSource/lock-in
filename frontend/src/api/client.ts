@@ -30,13 +30,24 @@ function formatApiDetail(data: unknown, status: number): string {
 export class ApiError extends Error {
   status: number;
   data: unknown;
+  /** Seconds the server asked us to wait (Retry-After on a 429 / 503), when it said. */
+  retryAfter?: number;
 
-  constructor(message: string, status: number, data?: unknown) {
+  constructor(message: string, status: number, data?: unknown, retryAfter?: number) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
+    this.retryAfter = retryAfter;
   }
+}
+
+/** Retry-After as whole seconds (a number of seconds, as this API sends it). Missing or not a number -> undefined. */
+function retryAfterSeconds(res: Response): number | undefined {
+  const raw = res.headers.get('Retry-After');
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.ceil(n) : undefined;
 }
 
 export function getAuthToken(): string | null {
@@ -126,7 +137,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     const data = await res.json().catch(() => null);
 
     if (!res.ok) {
-      throw new ApiError(formatApiDetail(data, res.status), res.status, data);
+      throw new ApiError(formatApiDetail(data, res.status), res.status, data, retryAfterSeconds(res));
     }
 
     return data as T;
