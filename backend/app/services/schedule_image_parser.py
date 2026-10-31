@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from app.guard import untrusted
 from app.services.calendar_import import classify
 from app.services.parse_utils import load_json_object
 
@@ -21,7 +22,6 @@ MAX_TITLE_CHARS = 120
 PAST_DAYS = 1            # a date sheet photographed this morning may still list today
 FUTURE_DAYS = 400
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-_BAD_CHARS = re.compile(r"[<>\x00-\x1f\x7f]")
 
 PROMPT = """\
 This is a photo or screenshot of a timetable, exam date sheet, class schedule or a notice. Today is {today}.
@@ -59,7 +59,8 @@ class ParsedSchedule:
 
 
 def _clean(text: object) -> str:
-    return re.sub(r"\s+", " ", _BAD_CHARS.sub("", text if isinstance(text, str) else "")).strip()[:MAX_TITLE_CHARS]
+    """Canonical, single-line, link-free (guard/untrusted.py): a title from a picture is untrusted text."""
+    return untrusted.clean_label(text, MAX_TITLE_CHARS)
 
 
 def _time(value: object) -> str | None:
@@ -97,6 +98,9 @@ def parse_reply(raw: str, today: date) -> ParsedSchedule | None:
             skipped += 1
             continue
         kind = entry.get("type")
+        if untrusted.is_hostile(entry.get("title")):
+            skipped += 1                              # small print aimed at the model, not a timetable row
+            continue
         title = _clean(entry.get("title"))
         day = _day(entry.get("date"))
         if kind not in ("event", "task") or not title:

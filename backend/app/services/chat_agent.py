@@ -12,7 +12,8 @@ Order of business (the order IS the safety design, identical to ChatService):
      (one model call, exactly as before) so the extra planner call is only paid when it can matter.
   3. planner call -> validate_plan(). Unusable / unavailable -> plain chat answer.
   4. unambiguous writes AUTO-APPLY with an Undo payload; ambiguous ones come back as a PENDING card the client
-     confirms (re-validated server side) -- nothing ambiguous is ever written silently.
+     confirms (re-validated server side) -- nothing ambiguous is ever written silently. Auto-applies are also capped
+     per minute and per day (limits/writecap.py): past the ceiling an action waits for a tap, like an ambiguous one.
   5. if the message also asked a question, ChatService answers it with its facts pack and validators, untouched.
 """
 from __future__ import annotations
@@ -31,11 +32,12 @@ from app.cache import data_version
 from app.dates import Clock, utc_now
 from app.domain import GOAL_DOMAINS, HabitLog, HabitStatus, SleepLog
 from app.exceptions import ConflictError, DailyLimitError, NotFoundError, ValidationError
+from app.guard import untrusted
 from app.guard.grounding import BULK_TOOLS, bulk_guard, grounding_reason
 from app.guard.inject import assess as assess_injection
 from app.guard.scope import OUT_OF_SCOPE_REPLY, check as check_scope
 from app.guard.signing import CardSigner, CardTokenError
-from app.limits import strikes
+from app.limits import strikes, writecap
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.safety import conversation_has_crisis
@@ -146,6 +148,14 @@ class ActionCard:
 
 def _clip(text: object, n: int) -> str:
     return sanitize_user_text(str(text), n, single_line=True)
+
+
+def _safe_name(raw: object, limit: int) -> str | None:
+    """A habit name or task title for the planner's <context>. Titles can arrive from imports (a photo of a notice
+    becomes tasks), so one that reads like an instruction to the model is left OUT of the context: it stays in the
+    person's list untouched, the model just never sees it. Links are stripped from what it does see."""
+    name = untrusted.clean_label(raw, limit)
+    return name if name and not untrusted.is_hostile(name) else None
 
 
 def _hm(value: object) -> str | None:
@@ -303,10 +313,10 @@ class AgentExecutor:
     async def context(self, user_id: UUID) -> AgentContext:
         profile = await self._profiles.get(user_id)
         tz, now = zone(profile.timezone), self._clock()
-        habits = {h.id: _clip(h.name, 60) for h in await self._habits.list_habits(user_id)}
+        habits = {h.id: n for h in await self._habits.list_habits(user_id) if (n := _safe_name(h.name, 60))}
         views = [v for v in await self._tasks.list(user_id, "open")]
         views.sort(key=lambda v: (v.state != "due", -v.task.importance))
-        tasks = {v.task.id: _clip(v.task.title, 80) for v in views[:CONTEXT_TASKS]}
+        tasks = {v.task.id: n for v in views[:CONTEXT_TASKS] if (n := _safe_name(v.task.title, 80))}
         return AgentContext(now, tz, profile.timezone, now.astimezone(tz).date(), habits, tasks)
 
     async def apply(self, user_id: UUID, planned: PlannedAction, *, confirmed: bool) -> ActionCard:
@@ -315,6 +325,11 @@ class AgentExecutor:
         needs_ok = planned.tool in ALWAYS_CONFIRM or planned.ambiguous is not None
         if needs_ok and not confirmed:
             return ActionCard(card_id, planned.tool, "pending", planned.summary, planned.ambiguous, args=planned.args)
+        if not confirmed:
+            # An unprompted write: spend one auto-apply. A tap on a confirm card is the person acting, never capped.
+            capped = await writecap.reserve(user_id)
+            if capped is not None:
+                return ActionCard(card_id, planned.tool, "pending", planned.summary, capped, args=planned.args)
         try:
             undo = await self._write(user_id, planned)
         except (NotFoundError, ValidationError) as exc:
@@ -464,6 +479,8 @@ class AgentChatService:
             + c.summary + (" (needs your OK)" if c.status == "pending" else f" ({c.reason})" if c.status == "failed" else "")
             for c in cards
         ]
+        if any(c.status == "pending" and c.reason == writecap.CAP_REASON for c in cards):
+            flags.append("autoapply_cap")
         reply = ChatReply(mode="action", reply="\n".join(lines), actions=cards, flags=flags)
         if wants_answer:
             try:

@@ -18,6 +18,7 @@ from app.dates import Clock, utc_now
 from app.exceptions import DailyLimitError, ServiceUnavailableError, ValidationError
 from app.safety import is_crisis, support_payload
 from app.services.audio_sniff import inspect_audio
+from app.services.image_dims import exceeds as too_many_pixels
 from app.services.checkin_parser import MAX_SPEECH_CHARS, ParsedCheckin, build_messages, parse_reply
 from app.services.habits_service import HabitsService
 from app.services.llm import LLMBudgetExceeded, LLMError, LLMRejectedInput, MediaLLM, seconds_until_reset
@@ -101,6 +102,8 @@ class MediaService:
         media_type = sniff_image(image)
         if media_type is None:
             raise ValidationError("Use a PNG, JPEG or WebP screenshot.")
+        if too_many_pixels(image, get_settings().max_image_pixels):
+            raise ValidationError("That image is too large. Use a normal screenshot.")
         raw = await self._guard(lambda: self._llm.describe_image(image, media_type, PROMPT))
         parsed = parse_screen(raw)
         if parsed is None:
@@ -117,6 +120,8 @@ class MediaService:
         media_type = sniff_image(image)
         if media_type is None:
             raise ValidationError("Use a PNG, JPEG or WebP image.")
+        if too_many_pixels(image, get_settings().max_image_pixels):
+            raise ValidationError("That image is too large. Use a normal photo or screenshot.")
         tz = zone((await self._profiles.get(user_id)).timezone)
         today = self._clock().astimezone(tz).date()
         prompt = schedule_parser.PROMPT.format(today=today.isoformat())
