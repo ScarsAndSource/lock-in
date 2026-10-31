@@ -8,6 +8,9 @@ that the call is refused with SlotsBusy and BudgetedLLM turns it into LLMUnavail
 deterministic fallback as an outage. A refusal here happens BEFORE anything is charged, and is never counted by the
 circuit breaker. The crisis path never calls a model, so it never waits for a slot.
 
+The request's database connection is handed back to the pool (app/dbrelease.py) BEFORE the wait for a slot, so neither
+the wait nor the model call pins one. Routes that don't opt in, and requests that have already written, are untouched.
+
 One semaphore per event loop (a semaphore is bound to the loop it first waits on; tests and reload create several).
 """
 from __future__ import annotations
@@ -17,6 +20,7 @@ import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from app import dbrelease
 from app.config import get_settings
 
 
@@ -39,6 +43,7 @@ def _semaphore(size: int) -> asyncio.Semaphore:
 @asynccontextmanager
 async def ai_slot() -> AsyncIterator[None]:
     s = get_settings()
+    await dbrelease.release()
     if s.ai_max_concurrent <= 0:
         yield
         return
