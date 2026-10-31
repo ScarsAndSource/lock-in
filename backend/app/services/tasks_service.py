@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from app.dates import Clock, utc_now
 from app.domain import NotificationPrefs, Task
 from app.exceptions import NotFoundError, ValidationError
+from app.guard import freetext
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.task_repository import TaskRepository
 from app.safety import is_crisis, support_payload
@@ -115,7 +116,8 @@ class TasksService:
         if room <= 0:
             raise ValidationError(f"You already have {MAX_OPEN_TASKS} open tasks. Finish or drop some first.")
 
-        parsed = await parse_capture(self._llm, clean, now, tz, tz_name)
+        # Text that reads like an instruction to the model never reaches it: the deterministic parser takes it instead.
+        parsed = None if await freetext.screen(user_id, raw, source="capture") else await parse_capture(self._llm, clean, now, tz, tz_name)
         mode = "parsed"
         if parsed is None:
             parsed, mode = fallback_parse(clean), "fallback"
