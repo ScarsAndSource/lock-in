@@ -24,7 +24,7 @@ import httpx
 
 from app.cache import media as media_cache
 from app.dates import Clock, utc_now
-from app.limits import aigate, budget
+from app.limits import aigate, budget, ceiling, slots
 from app.limits.turn import current_turn
 from app.repositories.llm_usage_repository import LlmUsageRepository
 
@@ -245,7 +245,15 @@ class BudgetedLLM:
         reason = await aigate.blocked_reason(self._user_id)
         if reason is not None:
             raise LLMUnavailableError(f"AI is switched off right now ({reason}).")
+        # A bounded number of model calls in flight per instance (they pin DB connections while they wait). Refused
+        # BEFORE anything is charged and outside the breaker's try, so being busy never counts as the provider failing.
+        try:
+            async with slots.ai_slot():
+                return await self._metered_in_slot(call, weight)
+        except slots.SlotsBusy as exc:
+            raise LLMUnavailableError("AI is busy right now.") from exc
 
+    async def _metered_in_slot(self, call: Callable[[], Awaitable[str]], weight: int) -> str:
         turn = current_turn.get()
         if turn is not None:
             await turn.charge()
@@ -272,6 +280,7 @@ class BudgetedLLM:
         if tokens:
             await self._usage.add_tokens(self._user_id, day, self._feature, tokens)
             await budget.add_tokens(self._user_id, day, tokens)
+        await ceiling.note(calls=1, tokens=tokens or 0)       # the all-users daily ceiling (off unless configured)
         return text
 
     async def complete(self, messages: list[dict], *, max_tokens: int = 512, temperature: float = 0.3) -> str:

@@ -22,6 +22,7 @@ from app.dates import Clock
 from app.db import AsyncSessionLocal, apply_rls_context
 from app.deps import get_action_secret, get_actions_service, get_clock
 from app.exceptions import RateLimitedError
+from app.netutil import client_ip
 from app.ratelimit import get_limiter, rate_limit
 from app.schemas_actions import ActionOut, InAppActionRequest, TokenActionRequest
 from app.security import get_current_user_id
@@ -49,11 +50,6 @@ def get_actions_factory(settings: Settings = Depends(get_settings), clock: Clock
     return factory
 
 
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    return (forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown"))[:64]
-
-
 @router.post("/in-app", response_model=ActionOut, dependencies=[Depends(rate_limit("api"))])
 async def run_in_app(
     body: InAppActionRequest,
@@ -75,7 +71,9 @@ async def run_token(
     factory: ActionsFactory = Depends(get_actions_factory),
 ) -> ActionOut:
     if settings.rate_limit_enabled:
-        wait = get_limiter().check(f"push_action:{_client_ip(request)}", settings.rate_limit_push_action_per_minute, 60)
+        wait = get_limiter().check(
+            f"push_action:{client_ip(request, settings.trusted_proxy_hops)}", settings.rate_limit_push_action_per_minute, 60,
+        )
         if wait is not None:
             raise RateLimitedError(wait)
     try:

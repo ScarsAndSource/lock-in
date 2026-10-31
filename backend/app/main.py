@@ -4,12 +4,16 @@ import asyncio
 import logging
 import re
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
+from app import audit
+from app.audit_sql import write_event
 from app.config import get_settings
 from app.db import engine, ping_database
 from app.exceptions import (
@@ -22,7 +26,9 @@ from app.routers import (
     pause_shortcuts, pauses, profile, retros, screen_time, sleep, stats,
     study, support, tasks, urges, growth, crew, journey,
 )
+from app.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
 from app.observability import init_sentry, tag_request
+from app.redis_client import close_redis, safe
 from app.schema_check import check_schema
 
 settings = get_settings()
@@ -57,11 +63,25 @@ class _RedactIngestToken(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_RedactIngestToken())
 
 
+def describe_redis(url: str) -> str:
+    """Host and port only: the URL carries the password."""
+    if not url:
+        return "not configured: rate limits, locks, caches and card nonces are per-process and reset on restart"
+    parts = urlsplit(url)
+    return f"configured ({parts.scheme}://{parts.hostname}:{parts.port or ''})"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
+    logger.info("Redis: %s", describe_redis(settings.redis_url))
+    audit.set_sink(write_event)                  # security events also go to ai_security_events (migration 028)
     await check_schema(engine, settings.schema_check_mode)
-    yield
+    try:
+        yield
+    finally:
+        audit.set_sink(None)
+        await close_redis()
 
 
 app = FastAPI(title="Lock'in API", version="0.2.0", lifespan=lifespan)
@@ -72,6 +92,7 @@ async def request_context(request: Request, call_next):
     incoming = request.headers.get("x-request-id", "")
     request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid4().hex
     request.state.request_id = request_id
+    audit.request_id_var.set(request_id)
     tag_request(request_id)
     length = request.headers.get("content-length", "")
     limit = _UPLOAD_BODY_BYTES if request.url.path in _UPLOAD_PATHS else _MAX_BODY_BYTES
@@ -86,13 +107,21 @@ async def request_context(request: Request, call_next):
     return response
 
 
-# Added AFTER request_context so CORS is the outermost layer: early responses (413) get CORS headers too.
+# Stack, outermost first: CORS, security headers, streaming body limit, request_context. CORS stays outermost so early
+# responses (413) still carry CORS headers. The body limit catches chunked uploads that declare no Content-Length.
+app.add_middleware(
+    BodyLimitMiddleware,
+    max_bytes=_MAX_BODY_BYTES, upload_max_bytes=_UPLOAD_BODY_BYTES, upload_paths=_UPLOAD_PATHS,
+)
+app.add_middleware(SecurityHeadersMiddleware, hsts=settings.app_env.strip().lower() in {"production", "prod"})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    # Exactly what the web app sends (src/api/client.ts, src/api/chat.ts). Add a name here if the client gains a header.
+    allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Request-ID"],
+    expose_headers=["Retry-After", "X-Request-ID"],   # without this the browser hides them from fetch()
 )
 
 
@@ -146,6 +175,17 @@ async def unavailable_handler(request: Request, exc: ServiceUnavailableError) ->
     return _detail(status.HTTP_503_SERVICE_UNAVAILABLE, exc)
 
 
+@app.exception_handler(PoolTimeoutError)
+async def pool_timeout_handler(request: Request, exc: PoolTimeoutError) -> JSONResponse:
+    """Every database connection is in use (usually slow model calls). Answer fast instead of queueing forever."""
+    logger.warning("DB pool exhausted request_id=%s path=%s", getattr(request.state, "request_id", "?"), redact_path(request.url.path))
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Busy right now. Try again in a moment."},
+        headers={"Retry-After": "2"},
+    )
+
+
 @app.exception_handler(DataIntegrityError)
 async def integrity_handler(request: Request, exc: DataIntegrityError) -> JSONResponse:
     logger.error("DATA INTEGRITY: %s request_id=%s", exc, getattr(request.state, "request_id", "?"))
@@ -174,7 +214,10 @@ async def ready():
     except Exception:  # noqa: BLE001 -- logged, reported as 503
         logger.exception("Readiness check failed")
         return JSONResponse(status_code=503, content={"status": "unavailable"})
-    return {"status": "ready"}
+    redis_state = "off"
+    if settings.redis_url:
+        redis_state = "up" if await safe(lambda r: r.ping(), None) else "down"
+    return {"status": "ready", "redis": redis_state}
 
 
 for module in (

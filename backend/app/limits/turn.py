@@ -23,7 +23,7 @@ from uuid import UUID
 
 from app.config import Settings
 from app.exceptions import ConflictError, RateLimitedError
-from app.limits import gcra, lock
+from app.limits import gcra, lock, strikes
 
 BUSY_MESSAGE = "Still working on your last message. Give me a second."
 
@@ -49,12 +49,14 @@ class TurnGate:
                     raise ConflictError(BUSY_MESSAGE)
                 self._token = token
             if s.rate_limit_enabled:
+                scale = await strikes.cap_scale(self._user)          # 0.5 while the person's AI limits are halved
                 retry_after = await gcra.check(self._user, [
-                    gcra.Bucket("chat_min", s.rate_limit_chat_per_minute, 60),
-                    gcra.Bucket("chat_hour", s.rate_limit_chat_per_hour, 3600),
+                    gcra.Bucket("chat_min", strikes.scaled(s.rate_limit_chat_per_minute, scale), 60),
+                    gcra.Bucket("chat_hour", strikes.scaled(s.rate_limit_chat_per_hour, scale), 3600),
                 ])
                 if retry_after is not None:
                     await self._release_lock()
+                    await strikes.note_limited(self._user, "chat")
                     raise RateLimitedError(retry_after)
             self._charged = True
 

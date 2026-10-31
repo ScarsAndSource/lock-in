@@ -26,6 +26,7 @@ from datetime import date, datetime, time, timedelta
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
+from app import audit
 from app.cache import data_version
 from app.dates import Clock, utc_now
 from app.domain import GOAL_DOMAINS, HabitLog, HabitStatus, SleepLog
@@ -34,6 +35,7 @@ from app.guard.grounding import BULK_TOOLS, bulk_guard, grounding_reason
 from app.guard.inject import assess as assess_injection
 from app.guard.scope import OUT_OF_SCOPE_REPLY, check as check_scope
 from app.guard.signing import CardSigner, CardTokenError
+from app.limits import strikes
 from app.repositories.habit_repository import HabitRepository
 from app.repositories.sleep_repository import SleepRepository
 from app.safety import conversation_has_crisis
@@ -434,6 +436,11 @@ class AgentChatService:
 
         # Injection + scope run on the RAW message (brackets and hidden characters are part of the signal), after crisis.
         verdict = assess_injection(message)
+        if verdict.blocked or verdict.contained:
+            await strikes.record(
+                user_id, "injection_blocked" if verdict.blocked else "injection_contained",
+                meta={"msg": audit.digest(message), "reasons": ",".join(verdict.reasons)[:60]},
+            )
         if verdict.blocked:
             return ChatReply(mode="fallback", reply=BLOCKED_REPLY, flags=["injection_blocked", *verdict.reasons])
         if check_scope(message).out_of_scope:

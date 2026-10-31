@@ -21,9 +21,11 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from uuid import UUID
 
+from app import audit
 from app.dates import Clock, utc_now
 from app.exceptions import DailyLimitError, NotFoundError, ValidationError
 from app.guard.output import check_reply
+from app.limits import strikes
 from app.safety import SUPPORT_MESSAGE, conversation_has_crisis, support_payload
 from app.services.chat_facts import build_chat_facts, fact_days, fallback_digest
 from app.services.goals_service import GoalsService
@@ -174,6 +176,15 @@ class ChatService:
             raise DailyLimitError(seconds_until_reset(self._clock())) from exc
         except LLMError:
             narration = None
+
+        # Only signals that a hostile prompt can cause count as strikes. "clinical" and "phone" are easy to trip by accident
+        # (someone says they feel depressed; a list of numbers), so they downgrade the reply but never count against the person.
+        bad = [f for f in flags if f in ("output_leak", "output_url", "output_markup", "output_email")]
+        if bad:
+            await strikes.record(
+                user_id, "prompt_leak" if "output_leak" in bad else "output_rejected",
+                meta={"flags": ",".join(bad)[:60], "msg": audit.digest(question)},
+            )
 
         if narration is None:
             return ChatReply(mode="fallback", reply=fallback_digest(facts), flags=flags)

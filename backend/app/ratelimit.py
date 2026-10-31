@@ -24,7 +24,7 @@ from fastapi import Depends
 
 from app.config import Settings, get_settings
 from app.exceptions import RateLimitedError
-from app.limits import gcra
+from app.limits import gcra, strikes
 from app.security import get_current_user_id
 
 
@@ -101,8 +101,14 @@ def rate_limit(
         if bucket in _LOCAL_ONLY:
             retry_after = get_limiter().check(f"{bucket}:{user_id}", limit, window_seconds)
         else:
-            retry_after = await gcra.check(str(user_id), [gcra.Bucket(bucket, limit, window_seconds, burst)])
+            scale = await strikes.cap_scale(user_id)                  # 0.5 while the person's AI limits are halved
+            retry_after = await gcra.check(str(user_id), [
+                gcra.Bucket(bucket, strikes.scaled(limit, scale), window_seconds,
+                            None if burst is None else strikes.scaled(burst, scale)),
+            ])
         if retry_after is not None:
+            if bucket not in _LOCAL_ONLY:
+                await strikes.note_limited(user_id, bucket)
             raise RateLimitedError(retry_after)
 
     return _dependency
